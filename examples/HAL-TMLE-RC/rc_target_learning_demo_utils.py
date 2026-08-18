@@ -53,7 +53,7 @@ DEFAULT_L1_KWARGS: dict[str, Any] = {
 DEFAULT_TARGETING_OPTIONS: dict[str, Any] = {
     **DEFAULT_TARGETING_KWARGS,
     "mode": "auto",
-    "targeting_gbar_floor_scale": 1.0,
+    "targeting_gbar_floor_scale": 5.0,
 }
 
 
@@ -480,6 +480,11 @@ def build_display_summary(target_type: str, augmented_summary: pd.DataFrame) -> 
         "km_bias",
         "plugin_bias",
         "targeted_bias",
+        "eif_mean_final",
+        "exact_eif_mean_final",
+        "exact_minus_implemented_eif_mean_final",
+        "threshold_final",
+        "exact_threshold_final",
         "passes_initial_threshold",
         "status_one_step",
         "n_iterations",
@@ -631,13 +636,94 @@ def _extract_estimate_rows(
     coord_col = target_coordinate_column(canonical)
     rows = augmented_summary.copy()
     rows["replicate"] = int(replicate)
+    score_keep = [
+        "eif_mean_initial_stage",
+        "exact_eif_mean_initial_stage",
+        "exact_minus_implemented_eif_mean_initial_stage",
+        "threshold_initial",
+        "exact_threshold_initial",
+        "eif_mean_one_step",
+        "exact_eif_mean_one_step",
+        "exact_minus_implemented_eif_mean_one_step",
+        "threshold_one_step",
+        "exact_threshold_one_step",
+        "eif_mean_final",
+        "exact_eif_mean_final",
+        "exact_minus_implemented_eif_mean_final",
+        "threshold_final",
+        "exact_threshold_final",
+    ]
+    targeting_keep = [
+        "tmle_was_used",
+        "passes_initial_threshold",
+        "status_one_step",
+        "n_iterations",
+        "stop_reason",
+        "continued_past_one_step",
+        "used_iterative",
+        "targeting_gbar_floor",
+        "targeting_gbar_floor_scale",
+        "clip_active_eic_included_count",
+        "clip_active_eic_excluded_count",
+        "clip_active_eic_excluded_rate",
+        "clip_active_eic_included_count_final",
+        "clip_active_eic_excluded_count_final",
+        "clip_active_eic_excluded_rate_final",
+        "positivity_eic_included_count",
+        "positivity_eic_excluded_count",
+        "positivity_eic_excluded_rate",
+    ]
     if coord_col is None:
         rows["target"] = canonical
         keep = ["replicate", "target", "truth", "psi_init", "psi_final"]
     else:
         keep = ["replicate", coord_col, "truth", "psi_km", "psi_init", "psi_final"]
+    keep.extend(score_keep)
+    keep.extend(targeting_keep)
     keep = [col for col in keep if col in rows.columns]
     return rows.loc[:, keep].copy()
+
+
+def _add_survival_positivity_flags(
+    estimates: pd.DataFrame,
+    *,
+    km: KaplanMeier,
+) -> pd.DataFrame:
+    rows = estimates.copy()
+    if len(rows) == 0:
+        return rows
+    required_cols = {"t0", "targeting_gbar_floor"}
+    if not required_cols.issubset(rows.columns):
+        rows["survival_gbar_t0_raw"] = np.nan
+        rows["survival_gbar_t0_clipped"] = False
+        rows["survival_n_jump_terms"] = 0
+        rows["survival_n_jump_terms_clipped"] = 0
+        rows["survival_positivity_issue"] = False
+        return rows
+
+    t0_vals = rows["t0"].to_numpy(dtype=float)
+    floors = rows["targeting_gbar_floor"].to_numpy(dtype=float)
+    gbar_t0_raw = np.asarray(km.predict(t0_vals), dtype=float)
+
+    jump_times, gbar_right = km.stepwise_survival_()
+    jump_times = np.asarray(jump_times, dtype=float)
+    gbar_right = np.asarray(gbar_right, dtype=float)
+    n_jump_terms = np.zeros_like(t0_vals, dtype=int)
+    n_jump_terms_clipped = np.zeros_like(t0_vals, dtype=int)
+    for idx, (t0, floor) in enumerate(zip(t0_vals, floors)):
+        active_jump_mask = jump_times <= float(t0)
+        n_jump_terms[idx] = int(np.sum(active_jump_mask))
+        n_jump_terms_clipped[idx] = int(np.sum(gbar_right[active_jump_mask] < float(floor)))
+
+    gbar_t0_clipped = gbar_t0_raw < floors
+    positivity_issue = gbar_t0_clipped | (n_jump_terms_clipped > 0)
+
+    rows["survival_gbar_t0_raw"] = gbar_t0_raw
+    rows["survival_gbar_t0_clipped"] = gbar_t0_clipped
+    rows["survival_n_jump_terms"] = n_jump_terms
+    rows["survival_n_jump_terms_clipped"] = n_jump_terms_clipped
+    rows["survival_positivity_issue"] = positivity_issue
+    return rows
 
 
 def _resolve_mc_worker_count(n_workers: int, n_tasks: int) -> int:
@@ -711,7 +797,13 @@ def _single_target_mc_replicate_worker(task: dict[str, Any]) -> tuple[int, pd.Da
             else np.asarray(task["integration_grid"], dtype=float)
         ),
     )
-    return rep, _extract_estimate_rows(canonical, augmented, replicate=rep)
+    estimates = _extract_estimate_rows(canonical, augmented, replicate=rep)
+    if canonical == "Survival":
+        estimates = _add_survival_positivity_flags(
+            estimates,
+            km=init_bundle["km"],
+        )
+    return rep, estimates
 
 
 def _all_target_mc_replicate_worker(
@@ -741,17 +833,20 @@ def _all_target_mc_replicate_worker(
             else np.asarray(task["integration_grid"], dtype=float)
         ),
     )
-    return (
-        rep,
-        {
-            target_type: _extract_estimate_rows(
-                target_type,
-                result["augmented_summary"],
-                replicate=rep,
+    estimate_map: dict[str, pd.DataFrame] = {}
+    for target_type, result in demo_results.items():
+        rows = _extract_estimate_rows(
+            target_type,
+            result["augmented_summary"],
+            replicate=rep,
+        )
+        if normalize_target_type(target_type) == "Survival":
+            rows = _add_survival_positivity_flags(
+                rows,
+                km=init_bundle["km"],
             )
-            for target_type, result in demo_results.items()
-        },
-    )
+        estimate_map[target_type] = rows
+    return rep, estimate_map
 
 
 def _leave_one_out_oracle_coverage(values: np.ndarray, truth: float) -> float:

@@ -10,6 +10,7 @@ from haldensity.censoring.right.estimators import RightCensoredInitEstimator
 from haldensity.censoring.right.km import KaplanMeier
 from haldensity.targeting._right_censored_eic import (
     _build_clipped_wald_interval_allow_nan,
+    _compute_exact_mean_eif,
     _estimate_positivity_filtered_eic_variance,
 )
 from haldensity.targeting.right_censored_survival.learner import (
@@ -127,14 +128,13 @@ def _compute_mean_direction_on_grid(
         grid,
         targeting_gbar_floor=effective_gbar_floor,
     )
-    first_term = grid / gbar_grid - mu
+    first_term = grid / gbar_grid
 
     jump_times = censoring_cache.jump_times
     jump_masses = censoring_cache.jump_masses
     if jump_times.size == 0:
         tail_mean_jump = np.empty(0, dtype=float)
         gbar_right_u = np.empty(0, dtype=float)
-        constant_jump_correction = np.empty(0, dtype=float)
         increments = np.empty(0, dtype=float)
         cumulative_jump_term = np.zeros_like(grid)
     else:
@@ -144,8 +144,7 @@ def _compute_mean_direction_on_grid(
             jump_times,
             targeting_gbar_floor=effective_gbar_floor,
         )
-        constant_jump_correction = mu * jump_masses / gbar_right_u
-        increments = tail_mean_jump * jump_masses / np.square(gbar_right_u) - constant_jump_correction
+        increments = tail_mean_jump * jump_masses / np.square(gbar_right_u)
         cumulative_increments = np.cumsum(increments)
         cutoff_idx = np.searchsorted(jump_times, grid, side="right") - 1
         cumulative_jump_term = np.where(
@@ -171,7 +170,6 @@ def _compute_mean_direction_on_grid(
             np.square(gbar_right_u) if jump_times.size > 0 else np.empty(0, dtype=float)
         ),
         "tail_mean_jump": tail_mean_jump,
-        "target_constant_jump_correction": constant_jump_correction,
         "jump_increments": increments,
         "first_term_grid": first_term,
         "cumulative_jump_term_grid": cumulative_jump_term,
@@ -239,6 +237,34 @@ def _evaluate_mean_state(
         score_at_zero=score_at_zero,
     )
     return evaluated_state, {"direction_details": direction_details}
+
+
+def _compute_mean_exact_stage_diagnostics(
+    state: MeanTMLEState,
+    observed_data: pd.DataFrame,
+    *,
+    survival_clip: float,
+    targeting_gbar_floor: float,
+    n_obs: int,
+    min_score_tol: float,
+) -> dict[str, float]:
+    exact = _compute_exact_mean_eif(
+        target_grid=_state_to_target_grid(state),
+        censoring_cache=state.censoring_cache,
+        observed_data=observed_data,
+        survival_clip=survival_clip,
+        targeting_gbar_floor=targeting_gbar_floor,
+    )
+    _, threshold = _iterative_tolerance_from_sigma(
+        float(exact["eif_sigma"]),
+        n_obs,
+        min_score_tol,
+    )
+    return {
+        "eif_mean": float(exact["eif_mean"]),
+        "sigma": float(exact["eif_sigma"]),
+        "threshold": float(threshold),
+    }
 
 
 def _one_mean_tmle_update(
@@ -655,6 +681,7 @@ class RightCensoredMeanTargetLearner:
         if mode == "auto" and passes_initial_threshold:
             history_df = pd.DataFrame()
             final_state = init_state
+            one_step_state = init_state
             final_summary = None
             final_mu = float(init_state.mu_current)
             final_eif_mean = float(init_state.eif_mean)
@@ -789,6 +816,30 @@ class RightCensoredMeanTargetLearner:
             final_eif_mean_path = final_summary["eif_mean_path"]
             final_sigma_path = final_summary["sigma_path"]
             final_mu_path = final_summary["mu_path"]
+        init_exact = _compute_mean_exact_stage_diagnostics(
+            init_state,
+            observed_data,
+            survival_clip=self.survival_clip,
+            targeting_gbar_floor=targeting_gbar_floor,
+            n_obs=n_obs,
+            min_score_tol=self.min_score_tol,
+        )
+        one_step_exact = _compute_mean_exact_stage_diagnostics(
+            one_step_state,
+            observed_data,
+            survival_clip=self.survival_clip,
+            targeting_gbar_floor=targeting_gbar_floor,
+            n_obs=n_obs,
+            min_score_tol=self.min_score_tol,
+        )
+        final_exact = _compute_mean_exact_stage_diagnostics(
+            final_state,
+            observed_data,
+            survival_clip=self.survival_clip,
+            targeting_gbar_floor=targeting_gbar_floor,
+            n_obs=n_obs,
+            min_score_tol=self.min_score_tol,
+        )
         continued_past_one_step = bool(final_n_iterations > 1)
 
         ci_lower, ci_upper = _build_clipped_wald_interval_allow_nan(final_mu, init_se)
@@ -823,13 +874,25 @@ class RightCensoredMeanTargetLearner:
                     "score_at_solution": final_score_at_solution,
                     "objective_at_solution": final_objective_at_solution,
                     "eif_mean": final_eif_mean,
+                    "exact_eif_mean": float(final_exact["eif_mean"]),
+                    "exact_sigma": float(final_exact["sigma"]),
+                    "exact_threshold": float(final_exact["threshold"]),
+                    "exact_minus_implemented_eif_mean": float(
+                        final_exact["eif_mean"] - final_eif_mean
+                    ),
                     "solve_method": final_solve_method,
                     "converged": bool(final_stop_reason != "solver_failure"),
                     "psi_initial_stage": float(init_state.mu_current),
                     "eif_mean_initial_stage": float(init_state.eif_mean),
                     "sigma_initial_stage": float(init_state.eif_sigma),
+                    "exact_eif_mean_initial_stage": float(init_exact["eif_mean"]),
+                    "exact_sigma_initial_stage": float(init_exact["sigma"]),
                     "sigma_over_sqrtnlogn_initial": float(raw_init_tolerance),
                     "threshold_initial": float(threshold_initial),
+                    "exact_threshold_initial": float(init_exact["threshold"]),
+                    "exact_minus_implemented_eif_mean_initial_stage": float(
+                        init_exact["eif_mean"] - init_state.eif_mean
+                    ),
                     "passes_initial_threshold": passes_initial_threshold,
                     "estimand_variance_initial_stage": float(init_var),
                     "standard_error_initial_stage": float(init_se),
@@ -838,10 +901,16 @@ class RightCensoredMeanTargetLearner:
                     "psi_one_step": float(one_step_stage["psi_star"]),
                     "eif_mean_one_step": float(one_step_stage["eif_mean"]),
                     "sigma_one_step": float(one_step_stage["sigma"]),
+                    "exact_eif_mean_one_step": float(one_step_exact["eif_mean"]),
+                    "exact_sigma_one_step": float(one_step_exact["sigma"]),
                     "sigma_over_sqrtnlogn_one_step": float(
                         one_step_stage["sigma_over_sqrtnlogn"]
                     ),
                     "threshold_one_step": float(one_step_stage["threshold"]),
+                    "exact_threshold_one_step": float(one_step_exact["threshold"]),
+                    "exact_minus_implemented_eif_mean_one_step": float(
+                        one_step_exact["eif_mean"] - one_step_stage["eif_mean"]
+                    ),
                     "epsilon_one_step": float(one_step_stage["epsilon"]),
                     "estimand_variance_one_step": float(one_step_stage["estimand_variance"]),
                     "standard_error_one_step": float(one_step_stage["standard_error"]),
@@ -857,8 +926,14 @@ class RightCensoredMeanTargetLearner:
                     "psi_final": final_mu,
                     "eif_mean_final": final_eif_mean,
                     "sigma_final": float(final_sigma),
+                    "exact_eif_mean_final": float(final_exact["eif_mean"]),
+                    "exact_sigma_final": float(final_exact["sigma"]),
                     "sigma_over_sqrtnlogn_final": float(final_raw_tolerance),
                     "threshold_final": float(final_threshold),
+                    "exact_threshold_final": float(final_exact["threshold"]),
+                    "exact_minus_implemented_eif_mean_final": float(
+                        final_exact["eif_mean"] - final_eif_mean
+                    ),
                     "estimand_variance_final": final_var,
                     "standard_error_final": final_se,
                     "estimand_variance_all_eic_final": final_var_all_eic,
@@ -880,12 +955,6 @@ class RightCensoredMeanTargetLearner:
                 }
             ]
         )
-        summary["exact_eif_mean_initial_stage"] = summary["eif_mean_initial_stage"]
-        summary["exact_threshold_initial"] = summary["threshold_initial"]
-        summary["exact_eif_mean_one_step"] = summary["eif_mean_one_step"]
-        summary["exact_threshold_one_step"] = summary["threshold_one_step"]
-        summary["exact_eif_mean_final"] = summary["eif_mean_final"]
-        summary["exact_threshold_final"] = summary["threshold_final"]
         # Backwards-compatible aliases for notebooks created before the
         # clip-active EIC diagnostic rename.
         summary["positivity_eic_included_count"] = summary["clip_active_eic_included_count"]

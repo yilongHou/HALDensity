@@ -9,6 +9,7 @@ import pandas as pd
 from haldensity.censoring.right.estimators import RightCensoredInitEstimator
 from haldensity.censoring.right.km import KaplanMeier
 from haldensity.targeting._right_censored_eic import (
+    _compute_exact_rmst_eif,
     _estimate_positivity_filtered_eic_variance,
 )
 from haldensity.targeting.right_censored_survival.learner import (
@@ -135,32 +136,31 @@ def _evaluate_tail_rmst(
     return tail_num / tail_surv
 
 
-def _evaluate_tail_truncated_mean(
-    target_grid: RCTargetGrid,
+def _evaluate_inv_gbar_integral(
+    censoring_cache: RCCensoringCache,
     points: np.ndarray,
-    tau: float,
-    survival_clip: float,
-) -> tuple[np.ndarray, np.ndarray]:
+    targeting_gbar_floor: float,
+) -> np.ndarray:
     pts = np.asarray(points, dtype=float)
-    truncated_time_grid = np.minimum(np.asarray(target_grid.grid_midpoints, dtype=float), float(tau))
-    tail_truncated_first_moment = np.cumsum(
-        (truncated_time_grid * target_grid.density_grid * target_grid.delta_j)[::-1]
-    )[::-1]
-    edge_tail_truncated_first_moment = np.concatenate((tail_truncated_first_moment, [0.0]))
-    tail_num = np.interp(
-        pts,
-        np.asarray(target_grid.grid_edges, dtype=float),
-        edge_tail_truncated_first_moment,
-        left=float(edge_tail_truncated_first_moment[0]),
-        right=0.0,
+    clipped_pts = np.maximum(pts, 0.0)
+    jump_times = np.asarray(censoring_cache.jump_times, dtype=float)
+    if jump_times.size == 0:
+        return clipped_pts
+
+    gbar_right = _evaluate_targeting_gbar(
+        censoring_cache,
+        jump_times,
+        targeting_gbar_floor=targeting_gbar_floor,
     )
-    tail_surv = np.maximum(
-        _evaluate_survival(target_grid, pts, survival_clip),
-        survival_clip,
+    interval_starts = np.concatenate(([0.0], jump_times))
+    interval_levels = np.concatenate(([1.0], gbar_right))
+    cumulative_area = np.concatenate(
+        ([0.0], np.cumsum(np.diff(interval_starts) / interval_levels[:-1]))
     )
-    tail_truncated_mean = tail_num / tail_surv
-    residual_rmst = tail_truncated_mean - np.minimum(pts, float(tau))
-    return tail_truncated_mean, residual_rmst
+    interval_idx = np.searchsorted(interval_starts, clipped_pts, side="right") - 1
+    interval_idx = np.clip(interval_idx, 0, len(interval_starts) - 1)
+    partial = (clipped_pts - interval_starts[interval_idx]) / interval_levels[interval_idx]
+    return cumulative_area[interval_idx] + partial
 
 
 def _compute_rmst_direction_on_grid(
@@ -172,26 +172,23 @@ def _compute_rmst_direction_on_grid(
 ) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
     psi = _compute_rmst_from_target_grid(target_grid, tau)
     grid = np.asarray(target_grid.grid_midpoints, dtype=float)
-    truncated_time_grid = np.minimum(grid, float(tau))
+    cutoff_points = np.minimum(grid, float(tau))
     effective_gbar_floor = float(max(targeting_gbar_floor, censoring_cache.clip))
-    gbar_grid = _evaluate_targeting_gbar(
+    first_term = _evaluate_inv_gbar_integral(
         censoring_cache,
-        grid,
+        cutoff_points,
         targeting_gbar_floor=effective_gbar_floor,
     )
-    first_term = truncated_time_grid / gbar_grid - psi
 
     jump_times = censoring_cache.jump_times
     jump_masses = censoring_cache.jump_masses
     if jump_times.size == 0:
-        tail_truncated_mean_jump = np.empty(0, dtype=float)
-        residual_rmst_jump = np.empty(0, dtype=float)
+        tail_rmst_jump = np.empty(0, dtype=float)
         gbar_right_u = np.empty(0, dtype=float)
-        constant_jump_correction = np.empty(0, dtype=float)
         increments = np.empty(0, dtype=float)
         cumulative_jump_term = np.zeros_like(grid)
     else:
-        tail_truncated_mean_jump, residual_rmst_jump = _evaluate_tail_truncated_mean(
+        tail_rmst_jump = _evaluate_tail_rmst(
             target_grid,
             jump_times,
             tau,
@@ -202,13 +199,9 @@ def _compute_rmst_direction_on_grid(
             jump_times,
             targeting_gbar_floor=effective_gbar_floor,
         )
-        constant_jump_correction = psi * jump_masses / gbar_right_u
-        increments = (
-            tail_truncated_mean_jump * jump_masses / np.square(gbar_right_u)
-            - constant_jump_correction
-        )
+        increments = tail_rmst_jump * jump_masses / np.square(gbar_right_u)
         cumulative_increments = np.cumsum(increments)
-        cutoff_idx = np.searchsorted(jump_times, grid, side="right") - 1
+        cutoff_idx = np.searchsorted(jump_times, cutoff_points, side="right") - 1
         cumulative_jump_term = np.where(
             cutoff_idx >= 0,
             cumulative_increments[np.clip(cutoff_idx, 0, len(cumulative_increments) - 1)],
@@ -232,9 +225,7 @@ def _compute_rmst_direction_on_grid(
         "gbar_jump_denom": (
             np.square(gbar_right_u) if jump_times.size > 0 else np.empty(0, dtype=float)
         ),
-        "tail_truncated_mean_jump": tail_truncated_mean_jump,
-        "tail_rmst_jump": residual_rmst_jump,
-        "target_constant_jump_correction": constant_jump_correction,
+        "tail_rmst_jump": tail_rmst_jump,
         "jump_increments": increments,
         "first_term_grid": first_term,
         "cumulative_jump_term_grid": cumulative_jump_term,
@@ -318,6 +309,35 @@ def _evaluate_rmst_state(
         score_at_zero=score_at_zero,
     )
     return evaluated_state, {"direction_details": direction_details}
+
+
+def _compute_rmst_exact_stage_diagnostics(
+    state: RMSTTMLEState,
+    observed_data: pd.DataFrame,
+    *,
+    survival_clip: float,
+    targeting_gbar_floor: float,
+    n_obs: int,
+    min_score_tol: float,
+) -> dict[str, float]:
+    exact = _compute_exact_rmst_eif(
+        target_grid=_state_to_target_grid(state),
+        censoring_cache=state.censoring_cache,
+        tau=state.tau,
+        observed_data=observed_data,
+        survival_clip=survival_clip,
+        targeting_gbar_floor=targeting_gbar_floor,
+    )
+    _, threshold = _iterative_tolerance_from_sigma(
+        float(exact["eif_sigma"]),
+        n_obs,
+        min_score_tol,
+    )
+    return {
+        "eif_mean": float(exact["eif_mean"]),
+        "sigma": float(exact["eif_sigma"]),
+        "threshold": float(threshold),
+    }
 
 
 def _one_rmst_tmle_update(
@@ -757,6 +777,7 @@ class RightCensoredRMSTTargetLearner:
                 history_df = pd.DataFrame()
                 final_summary = None
                 final_state = init_state
+                one_step_state = init_state
                 final_psi = float(init_state.psi_current)
                 final_eif_mean = float(init_state.eif_mean)
                 final_var_all_eic = float(init_var_all_eic)
@@ -889,6 +910,30 @@ class RightCensoredRMSTTargetLearner:
                 final_eif_mean_path = final_summary["eif_mean_path"]
                 final_sigma_path = final_summary["sigma_path"]
                 final_psi_path = final_summary["psi_path"]
+            init_exact = _compute_rmst_exact_stage_diagnostics(
+                init_state,
+                observed_data,
+                survival_clip=self.survival_clip,
+                targeting_gbar_floor=targeting_gbar_floor,
+                n_obs=n_obs,
+                min_score_tol=self.min_score_tol,
+            )
+            one_step_exact = _compute_rmst_exact_stage_diagnostics(
+                one_step_state,
+                observed_data,
+                survival_clip=self.survival_clip,
+                targeting_gbar_floor=targeting_gbar_floor,
+                n_obs=n_obs,
+                min_score_tol=self.min_score_tol,
+            )
+            final_exact = _compute_rmst_exact_stage_diagnostics(
+                final_state,
+                observed_data,
+                survival_clip=self.survival_clip,
+                targeting_gbar_floor=targeting_gbar_floor,
+                n_obs=n_obs,
+                min_score_tol=self.min_score_tol,
+            )
 
             continued_past_one_step = bool(final_n_iterations > 1)
             ci_lower, ci_upper = _build_rmst_wald_interval(final_psi, init_se, tau)
@@ -923,13 +968,25 @@ class RightCensoredRMSTTargetLearner:
                     "score_at_solution": final_score_at_solution,
                     "objective_at_solution": final_objective_at_solution,
                     "eif_mean": final_eif_mean,
+                    "exact_eif_mean": float(final_exact["eif_mean"]),
+                    "exact_sigma": float(final_exact["sigma"]),
+                    "exact_threshold": float(final_exact["threshold"]),
+                    "exact_minus_implemented_eif_mean": float(
+                        final_exact["eif_mean"] - final_eif_mean
+                    ),
                     "solve_method": final_solve_method,
                     "converged": bool(final_stop_reason != "solver_failure"),
                     "psi_initial_stage": float(init_state.psi_current),
                     "eif_mean_initial_stage": float(init_state.eif_mean),
                     "sigma_initial_stage": float(init_state.eif_sigma),
+                    "exact_eif_mean_initial_stage": float(init_exact["eif_mean"]),
+                    "exact_sigma_initial_stage": float(init_exact["sigma"]),
                     "sigma_over_sqrtnlogn_initial": float(raw_init_tolerance),
                     "threshold_initial": float(threshold_initial),
+                    "exact_threshold_initial": float(init_exact["threshold"]),
+                    "exact_minus_implemented_eif_mean_initial_stage": float(
+                        init_exact["eif_mean"] - init_state.eif_mean
+                    ),
                     "passes_initial_threshold": passes_initial_threshold,
                     "estimand_variance_initial_stage": float(init_var),
                     "standard_error_initial_stage": float(init_se),
@@ -938,8 +995,14 @@ class RightCensoredRMSTTargetLearner:
                     "psi_one_step": float(one_step_stage["psi_star"]),
                     "eif_mean_one_step": float(one_step_stage["eif_mean"]),
                     "sigma_one_step": float(one_step_stage["sigma"]),
+                    "exact_eif_mean_one_step": float(one_step_exact["eif_mean"]),
+                    "exact_sigma_one_step": float(one_step_exact["sigma"]),
                     "sigma_over_sqrtnlogn_one_step": float(one_step_stage["sigma_over_sqrtnlogn"]),
                     "threshold_one_step": float(one_step_stage["threshold"]),
+                    "exact_threshold_one_step": float(one_step_exact["threshold"]),
+                    "exact_minus_implemented_eif_mean_one_step": float(
+                        one_step_exact["eif_mean"] - one_step_stage["eif_mean"]
+                    ),
                     "epsilon_one_step": float(one_step_stage["epsilon"]),
                     "estimand_variance_one_step": float(one_step_stage["estimand_variance"]),
                     "standard_error_one_step": float(one_step_stage["standard_error"]),
@@ -951,8 +1014,14 @@ class RightCensoredRMSTTargetLearner:
                     "psi_final": final_psi,
                     "eif_mean_final": final_eif_mean,
                     "sigma_final": float(final_sigma),
+                    "exact_eif_mean_final": float(final_exact["eif_mean"]),
+                    "exact_sigma_final": float(final_exact["sigma"]),
                     "sigma_over_sqrtnlogn_final": float(final_raw_tolerance),
                     "threshold_final": float(final_threshold),
+                    "exact_threshold_final": float(final_exact["threshold"]),
+                    "exact_minus_implemented_eif_mean_final": float(
+                        final_exact["eif_mean"] - final_eif_mean
+                    ),
                     "estimand_variance_final": float(final_var),
                     "standard_error_final": float(final_se),
                     "estimand_variance_all_eic_final": float(final_var_all_eic),
@@ -1082,12 +1151,6 @@ class RightCensoredRMSTTargetLearner:
             pointwise_fits.append(fit_row)
 
         summary = pd.DataFrame(summary_rows).sort_values("tau").reset_index(drop=True)
-        summary["exact_eif_mean_initial_stage"] = summary["eif_mean_initial_stage"]
-        summary["exact_threshold_initial"] = summary["threshold_initial"]
-        summary["exact_eif_mean_one_step"] = summary["eif_mean_one_step"]
-        summary["exact_threshold_one_step"] = summary["threshold_one_step"]
-        summary["exact_eif_mean_final"] = summary["eif_mean_final"]
-        summary["exact_threshold_final"] = summary["threshold_final"]
         return {
             "targeting_points": tau_grid,
             "summary": summary,

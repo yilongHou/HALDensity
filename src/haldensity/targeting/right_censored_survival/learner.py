@@ -9,6 +9,7 @@ from scipy.optimize import brentq, minimize_scalar
 
 from haldensity.censoring.right.estimators import RightCensoredInitEstimator
 from haldensity.censoring.right.km import KaplanMeier
+from haldensity.targeting._right_censored_eic import _compute_exact_survival_eif
 
 
 @dataclass
@@ -988,6 +989,35 @@ def _evaluate_pointwise_state(
     return evaluated_state, {"direction_details": direction_details}
 
 
+def _compute_survival_exact_stage_diagnostics(
+    state: PointwiseTMLEState,
+    observed_data: pd.DataFrame,
+    *,
+    survival_clip: float,
+    targeting_gbar_floor: float,
+    n_obs: int,
+    min_score_tol: float,
+) -> dict[str, float]:
+    exact = _compute_exact_survival_eif(
+        target_grid=_state_to_target_grid(state),
+        censoring_cache=state.censoring_cache,
+        t0=state.t0,
+        observed_data=observed_data,
+        survival_clip=survival_clip,
+        targeting_gbar_floor=targeting_gbar_floor,
+    )
+    _, threshold = _iterative_tolerance_from_sigma(
+        float(exact["eif_sigma"]),
+        n_obs,
+        min_score_tol,
+    )
+    return {
+        "eif_mean": float(exact["eif_mean"]),
+        "sigma": float(exact["eif_sigma"]),
+        "threshold": float(threshold),
+    }
+
+
 def _one_local_tmle_update(
     current_state: PointwiseTMLEState,
     observed_data: pd.DataFrame,
@@ -1758,6 +1788,7 @@ def right_censored_survival_targeting_M_step_v2(
             final_eif_mean_path: list[float] = [float(init_state.eif_mean)]
             final_sigma_path: list[float] = [float(init_state.eif_sigma)]
             final_psi_path: list[float] = [float(init_state.psi_current)]
+            one_step_state = init_state
             one_step_stage = {
                 "psi_star": float(init_state.psi_current),
                 "eif_mean": float(init_state.eif_mean),
@@ -1774,14 +1805,14 @@ def right_censored_survival_targeting_M_step_v2(
                 "status": "skipped_initial_gate",
             }
         else:
-            iter_bundle = _iterate_tmle_t0(
+            one_step_bundle = _iterate_tmle_t0(
                 initial_fit=initial_fit,
                 censoring_cache=censoring_cache,
                 observed_data=observed_data,
                 t0=float(t0),
                 survival_clip=survival_clip,
                 targeting_gbar_floor=targeting_gbar_floor,
-                max_iter=1 if mode == "one_step" else max_iter,
+                max_iter=1,
                 min_abs_eps=min_abs_eps,
                 min_score_tol=min_score_tol,
                 eps_bracket_start=eps_bracket_start,
@@ -1789,14 +1820,33 @@ def right_censored_survival_targeting_M_step_v2(
                 eps_bracket_max=eps_bracket_max,
                 eps_fallback_bounds=eps_fallback_bounds,
             )
-            history_df = iter_bundle["history"]
-            final_summary = iter_bundle["summary"]
-            final_state = iter_bundle["final_state"]
+            one_step_state = one_step_bundle["final_state"]
             one_step_stage = _summarize_iterative_tmle_step(
-                iter_bundle,
+                one_step_bundle,
                 step=1,
                 min_score_tol=min_score_tol,
             )
+            if mode == "one_step":
+                final_bundle = one_step_bundle
+            else:
+                final_bundle = _iterate_tmle_t0(
+                    initial_fit=initial_fit,
+                    censoring_cache=censoring_cache,
+                    observed_data=observed_data,
+                    t0=float(t0),
+                    survival_clip=survival_clip,
+                    targeting_gbar_floor=targeting_gbar_floor,
+                    max_iter=max_iter,
+                    min_abs_eps=min_abs_eps,
+                    min_score_tol=min_score_tol,
+                    eps_bracket_start=eps_bracket_start,
+                    eps_bracket_growth=eps_bracket_growth,
+                    eps_bracket_max=eps_bracket_max,
+                    eps_fallback_bounds=eps_fallback_bounds,
+                )
+            history_df = final_bundle["history"]
+            final_summary = final_bundle["summary"]
+            final_state = final_bundle["final_state"]
             final_psi = float(final_summary["psi_star"])
             final_eif_mean = float(final_summary["eif_mean"])
             final_var = float(final_summary["estimand_variance"])
@@ -1815,6 +1865,30 @@ def right_censored_survival_targeting_M_step_v2(
             final_eif_mean_path = final_summary["eif_mean_path"]
             final_sigma_path = final_summary["sigma_path"]
             final_psi_path = final_summary["psi_path"]
+        init_exact = _compute_survival_exact_stage_diagnostics(
+            init_state,
+            observed_data,
+            survival_clip=survival_clip,
+            targeting_gbar_floor=targeting_gbar_floor,
+            n_obs=n_obs,
+            min_score_tol=min_score_tol,
+        )
+        one_step_exact = _compute_survival_exact_stage_diagnostics(
+            one_step_state,
+            observed_data,
+            survival_clip=survival_clip,
+            targeting_gbar_floor=targeting_gbar_floor,
+            n_obs=n_obs,
+            min_score_tol=min_score_tol,
+        )
+        final_exact = _compute_survival_exact_stage_diagnostics(
+            final_state,
+            observed_data,
+            survival_clip=survival_clip,
+            targeting_gbar_floor=targeting_gbar_floor,
+            n_obs=n_obs,
+            min_score_tol=min_score_tol,
+        )
         continued_past_one_step = bool(final_n_iterations > 1)
 
         default_var = float(init_var)
@@ -1834,22 +1908,40 @@ def right_censored_survival_targeting_M_step_v2(
                 "score_at_solution": final_score_at_solution,
                 "objective_at_solution": final_objective_at_solution,
                 "eif_mean": final_eif_mean,
+                "exact_eif_mean": float(final_exact["eif_mean"]),
+                "exact_sigma": float(final_exact["sigma"]),
+                "exact_threshold": float(final_exact["threshold"]),
+                "exact_minus_implemented_eif_mean": float(
+                    final_exact["eif_mean"] - final_eif_mean
+                ),
                 "solve_method": final_solve_method,
                 "converged": bool(final_stop_reason != "solver_failure"),
                 "target_grid_augmented_with_t0": bool(init_state.target_grid_augmented_with_t0),
                 "psi_initial_stage": float(init_state.psi_current),
                 "eif_mean_initial_stage": float(init_state.eif_mean),
                 "sigma_initial_stage": float(init_state.eif_sigma),
+                "exact_eif_mean_initial_stage": float(init_exact["eif_mean"]),
+                "exact_sigma_initial_stage": float(init_exact["sigma"]),
                 "sigma_over_sqrtnlogn_initial": float(raw_init_tolerance),
                 "threshold_initial": float(threshold_initial),
+                "exact_threshold_initial": float(init_exact["threshold"]),
+                "exact_minus_implemented_eif_mean_initial_stage": float(
+                    init_exact["eif_mean"] - init_state.eif_mean
+                ),
                 "passes_initial_threshold": passes_initial_threshold,
                 "estimand_variance_initial_stage": float(init_var),
                 "standard_error_initial_stage": float(init_se),
                 "psi_one_step": float(one_step_stage["psi_star"]),
                 "eif_mean_one_step": float(one_step_stage["eif_mean"]),
                 "sigma_one_step": float(one_step_stage["sigma"]),
+                "exact_eif_mean_one_step": float(one_step_exact["eif_mean"]),
+                "exact_sigma_one_step": float(one_step_exact["sigma"]),
                 "sigma_over_sqrtnlogn_one_step": float(one_step_stage["sigma_over_sqrtnlogn"]),
                 "threshold_one_step": float(one_step_stage["threshold"]),
+                "exact_threshold_one_step": float(one_step_exact["threshold"]),
+                "exact_minus_implemented_eif_mean_one_step": float(
+                    one_step_exact["eif_mean"] - one_step_stage["eif_mean"]
+                ),
                 "epsilon_one_step": float(one_step_stage["epsilon"]),
                 "estimand_variance_one_step": float(one_step_stage["estimand_variance"]),
                 "standard_error_one_step": float(one_step_stage["standard_error"]),
@@ -1859,8 +1951,14 @@ def right_censored_survival_targeting_M_step_v2(
                 "psi_final": final_psi,
                 "eif_mean_final": final_eif_mean,
                 "sigma_final": float(final_sigma),
+                "exact_eif_mean_final": float(final_exact["eif_mean"]),
+                "exact_sigma_final": float(final_exact["sigma"]),
                 "sigma_over_sqrtnlogn_final": float(final_raw_tolerance),
                 "threshold_final": float(final_threshold),
+                "exact_threshold_final": float(final_exact["threshold"]),
+                "exact_minus_implemented_eif_mean_final": float(
+                    final_exact["eif_mean"] - final_eif_mean
+                ),
                 "estimand_variance_final": final_var,
                 "standard_error_final": final_se,
                 "epsilon_last": final_epsilon,
@@ -1973,12 +2071,6 @@ def right_censored_survival_targeting_M_step_v2(
         pointwise_fits.append(fit_row)
 
     summary = pd.DataFrame(summary_rows).sort_values("t0").reset_index(drop=True)
-    summary["exact_eif_mean_initial_stage"] = summary["eif_mean_initial_stage"]
-    summary["exact_threshold_initial"] = summary["threshold_initial"]
-    summary["exact_eif_mean_one_step"] = summary["eif_mean_one_step"]
-    summary["exact_threshold_one_step"] = summary["threshold_one_step"]
-    summary["exact_eif_mean_final"] = summary["eif_mean_final"]
-    summary["exact_threshold_final"] = summary["threshold_final"]
     return {
         "targeting_points": targeting_points_arr,
         "summary": summary,

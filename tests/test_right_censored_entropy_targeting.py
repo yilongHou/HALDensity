@@ -126,7 +126,7 @@ def test_entropy_direction_no_censoring_reduces_to_centered_entropy_gradient():
         clip=1e-6,
     )
 
-    raw_direction, centered_direction, _ = _compute_entropy_direction_on_grid(
+    raw_direction, centered_direction, details = _compute_entropy_direction_on_grid(
         target_grid,
         cache,
         survival_clip=1e-8,
@@ -134,13 +134,14 @@ def test_entropy_direction_no_censoring_reduces_to_centered_entropy_gradient():
     )
 
     psi = np.sum((-np.log(density)) * density * delta_j)
-    expected_raw = -np.log(density) - psi
-    expected_centered = expected_raw
+    expected_raw = -np.log(density)
+    expected_centered = expected_raw - psi
     assert np.allclose(raw_direction, expected_raw)
     assert np.allclose(centered_direction, expected_centered)
+    assert np.isclose(details["raw_mean"], psi)
 
 
-def test_entropy_direction_uses_target_constant_jump_correction():
+def test_entropy_direction_uses_km_jump_sum():
     grid = np.array([0.25, 0.75])
     delta_j = np.array([0.5, 0.5])
     density = np.array([0.5, 1.5])
@@ -172,14 +173,12 @@ def test_entropy_direction_uses_target_constant_jump_correction():
     )
 
     phi_grid = -np.log(density)
-    psi = np.sum(phi_grid * density * delta_j)
     expected_tail_entropy = phi_grid[1]
-    expected_increment = expected_tail_entropy * 0.2 / (0.8**2) - psi * 0.2 / 0.8
+    expected_increment = expected_tail_entropy * 0.2 / (0.8**2)
     expected_cumulative = np.array([0.0, expected_increment])
-    expected_raw = np.array([phi_grid[0] / 1.0 - psi, phi_grid[1] / 0.8 - psi]) - expected_cumulative
+    expected_raw = np.array([phi_grid[0] / 1.0, phi_grid[1] / 0.8]) - expected_cumulative
 
     assert np.allclose(details["tail_entropy_jump"], [expected_tail_entropy])
-    assert np.allclose(details["target_constant_jump_correction"], [psi * 0.2 / 0.8])
     assert np.allclose(details["jump_increments"], [expected_increment])
     assert np.allclose(details["cumulative_jump_term_grid"], expected_cumulative)
     assert np.allclose(raw_direction, expected_raw)

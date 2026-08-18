@@ -200,9 +200,9 @@ def test_right_censored_mean_direction_no_censoring_reduces_to_centered_mean_gra
     )
 
     expected_centered = grid - 0.5
-    assert np.allclose(raw_direction, expected_centered)
+    assert np.allclose(raw_direction, grid)
     assert np.allclose(centered_direction, expected_centered)
-    assert np.isclose(details["raw_mean"], 0.0)
+    assert np.isclose(details["raw_mean"], 0.5)
 
 
 def test_right_censored_mean_direction_uses_km_jump_sum():
@@ -236,12 +236,11 @@ def test_right_censored_mean_direction_uses_km_jump_sum():
         survival_clip=1e-8,
     )
 
-    expected_increment = 0.75 * 0.2 / (0.8**2) - 0.5 * 0.2 / 0.8
+    expected_increment = 0.75 * 0.2 / (0.8**2)
     expected_cumulative = np.array([0.0, expected_increment])
-    expected_raw = np.array([0.25 / 1.0 - 0.5, 0.75 / 0.8 - 0.5]) - expected_cumulative
+    expected_raw = np.array([0.25 / 1.0, 0.75 / 0.8]) - expected_cumulative
 
     assert np.allclose(details["tail_mean_jump"], [0.75])
-    assert np.allclose(details["target_constant_jump_correction"], [0.5 * 0.2 / 0.8])
     assert np.allclose(details["jump_increments"], [expected_increment])
     assert np.allclose(details["cumulative_jump_term_grid"], expected_cumulative)
     assert np.allclose(raw_direction, expected_raw)
