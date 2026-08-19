@@ -78,10 +78,10 @@ def simulate_beta_uniform_right_censored(
     *,
     seed: int = 0,
     event_beta_shape: tuple[float, float] = (2.2, 2.5),
-    censor_low: float = 0.05,
-    censor_high: float = 0.95,
+    censor_low: float = 0.0,
+    censor_high: float = 1.2,
 ) -> dict[str, Any]:
-    """Simulate a simple beta-event / uniform-censoring right-censored dataset."""
+    """Simulate a simple beta-event / Unif[0, 1.2] censoring right-censored dataset."""
     rng = np.random.default_rng(seed)
     a, b = event_beta_shape
     event_times = rng.beta(a, b, size=int(n))
@@ -110,10 +110,10 @@ def simulate_truncnorm_uniform_right_censored(
     seed: int = 0,
     event_mean: float = 0.5,
     event_sd: float = 0.15,
-    censor_low: float = 0.05,
-    censor_high: float = 0.95,
+    censor_low: float = 0.0,
+    censor_high: float = 1.2,
 ) -> dict[str, Any]:
-    """Simulate a truncated-normal-event / uniform-censoring right-censored dataset."""
+    """Simulate a truncated-normal-event / Unif[0, 1.2] censoring right-censored dataset."""
     if event_sd <= 0.0:
         raise ValueError("event_sd must be positive.")
 

@@ -19,7 +19,7 @@ from haldensity.targeting.right_censored_survival.learner import (
 def _make_observed_data(n: int = 64, seed: int = 101) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
     event = np.clip(rng.beta(2.2, 2.5, size=n), 1e-3, 0.999)
-    censor = rng.uniform(0.05, 0.95, size=n)
+    censor = rng.uniform(0.0, 1.2, size=n)
     observed = np.minimum(event, censor)
     delta = (event <= censor).astype(int)
     data = pd.DataFrame({"T": observed, "Delta": delta})
@@ -100,7 +100,7 @@ def test_right_censored_mean_targeting_exports_and_shape():
 
 
 def test_right_censored_mean_targeting_store_arrays_and_initial_ci_convention():
-    data = _make_observed_data(seed=103)
+    data = _make_observed_data(n=256, seed=103)
     estimator, km = _fit_initial_estimator(data)
 
     targeted = right_censored_mean_targeting_M_step(
