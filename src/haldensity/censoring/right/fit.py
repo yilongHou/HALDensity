@@ -16,6 +16,8 @@ import pandas as pd
 from haldensity.utils.basis import create_basis_functions
 
 SCHEMA_VERSION = 1
+SUPPORTED_SCHEMA_VERSIONS = frozenset({SCHEMA_VERSION})
+SUPPORTED_NORMALIZER_METHODS = frozenset({"midpoint"})
 SUPPORT = (0.0, 1.0)
 
 
@@ -46,7 +48,13 @@ def _as_1d(values: Any) -> np.ndarray:
     return np.asarray(values, dtype=float).ravel()
 
 
-@dataclass
+def _frozen_1d(values: Any) -> np.ndarray:
+    array = _as_1d(values).copy()
+    array.setflags(write=False)
+    return array
+
+
+@dataclass(frozen=True)
 class RightCensoredHALFit:
     """Fitted right-censored HAL density with frozen ``(m, Z)``."""
 
@@ -62,21 +70,56 @@ class RightCensoredHALFit:
     support: tuple[float, float] = SUPPORT
     min_knot_spacing: Optional[float] = None
     schema_version: int = SCHEMA_VERSION
+    fitting_n_grid_points: Optional[int] = None
 
     def __post_init__(self) -> None:
-        self.theta = _as_1d(self.theta).copy()
-        self.knots = _as_1d(self.knots).copy()
-        self.selected_knots = _as_1d(self.selected_knots).copy()
-        self.basis_order = int(self.basis_order)
-        self.norm_shift = float(self.norm_shift)
-        self.norm_Z = float(self.norm_Z)
-        if self.norm_Z <= 0.0:
-            raise ValueError("norm_Z must be positive")
-        self.n_cells = int(self.n_cells)
+        object.__setattr__(self, "theta", _frozen_1d(self.theta))
+        object.__setattr__(self, "knots", _frozen_1d(self.knots))
+        object.__setattr__(self, "selected_knots", _frozen_1d(self.selected_knots))
+        object.__setattr__(self, "basis_order", int(self.basis_order))
+        object.__setattr__(self, "norm_shift", float(self.norm_shift))
+        object.__setattr__(self, "norm_Z", float(self.norm_Z))
+        object.__setattr__(self, "n_cells", int(self.n_cells))
+        object.__setattr__(self, "support", (float(self.support[0]), float(self.support[1])))
+        object.__setattr__(self, "schema_version", int(self.schema_version))
+        object.__setattr__(self, "normalizer_method", str(self.normalizer_method))
+        if self.last_failure is not None:
+            object.__setattr__(self, "last_failure", float(self.last_failure))
+        if self.min_knot_spacing is not None:
+            object.__setattr__(self, "min_knot_spacing", float(self.min_knot_spacing))
+        if self.fitting_n_grid_points is not None:
+            object.__setattr__(self, "fitting_n_grid_points", int(self.fitting_n_grid_points))
+
+        if self.schema_version not in SUPPORTED_SCHEMA_VERSIONS:
+            raise ValueError(
+                f"Unsupported RightCensoredHALFit schema_version={self.schema_version}; "
+                f"supported versions are {sorted(SUPPORTED_SCHEMA_VERSIONS)}"
+            )
+        if self.normalizer_method not in SUPPORTED_NORMALIZER_METHODS:
+            raise ValueError(
+                f"Unsupported normalizer_method={self.normalizer_method!r}; "
+                f"supported methods are {sorted(SUPPORTED_NORMALIZER_METHODS)}"
+            )
+        if not np.isfinite(self.norm_shift):
+            raise ValueError("norm_shift must be finite")
+        if not np.isfinite(self.norm_Z) or self.norm_Z <= 0.0:
+            raise ValueError("norm_Z must be finite and positive")
         if self.n_cells < 1:
             raise ValueError("n_cells must be at least 1")
-        self.support = (float(self.support[0]), float(self.support[1]))
-        self.schema_version = int(self.schema_version)
+        if self.fitting_n_grid_points is not None and self.fitting_n_grid_points < 2:
+            raise ValueError("fitting_n_grid_points must be at least 2")
+        if self.last_failure is not None and not np.isfinite(self.last_failure):
+            raise ValueError("last_failure must be finite when provided")
+        if self.min_knot_spacing is not None and (
+            not np.isfinite(self.min_knot_spacing) or self.min_knot_spacing < 0.0
+        ):
+            raise ValueError("min_knot_spacing must be finite and non-negative")
+        if not np.all(np.isfinite(self.theta)):
+            raise ValueError("theta must be finite")
+        if not np.all(np.isfinite(self.knots)):
+            raise ValueError("knots must be finite")
+        if not np.all(np.isfinite(self.selected_knots)):
+            raise ValueError("selected_knots must be finite")
 
     @classmethod
     def from_estimator(
@@ -111,6 +154,10 @@ class RightCensoredHALFit:
         if recorded is None:
             recorded = getattr(estimator, "_last_failure", None)
 
+        fitting_n_grid_points = getattr(estimator, "n_grid_points", None)
+        if fitting_n_grid_points is not None:
+            fitting_n_grid_points = int(fitting_n_grid_points)
+
         return cls(
             theta=estimator.theta_hat,
             knots=knots,
@@ -121,6 +168,7 @@ class RightCensoredHALFit:
             last_failure=None if recorded is None else float(recorded),
             normalizer_method="midpoint",
             n_cells=n_cells,
+            fitting_n_grid_points=fitting_n_grid_points,
         )
 
     def to_state(self) -> dict[str, Any]:
@@ -138,6 +186,7 @@ class RightCensoredHALFit:
             "n_cells": int(self.n_cells),
             "support": [float(self.support[0]), float(self.support[1])],
             "min_knot_spacing": self.min_knot_spacing,
+            "fitting_n_grid_points": self.fitting_n_grid_points,
         }
 
     @classmethod
@@ -157,6 +206,7 @@ class RightCensoredHALFit:
             support=(float(support[0]), float(support[1])),
             min_knot_spacing=state.get("min_knot_spacing"),
             schema_version=int(state.get("schema_version", SCHEMA_VERSION)),
+            fitting_n_grid_points=state.get("fitting_n_grid_points"),
         )
 
     def density(self, t: np.ndarray | float) -> np.ndarray:

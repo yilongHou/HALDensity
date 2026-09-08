@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError
 import warnings
 
 import numpy as np
@@ -171,3 +172,46 @@ def test_cvl1mle_tuner_get_fit_matches_selected_estimator() -> None:
         atol=1e-12,
     )
     assert result.estimator.get_fit() is result.estimator.get_fit()
+
+
+def test_k0_fit_keeps_fitting_grid_separate_from_normalizer() -> None:
+    data = _make_data()
+    est = _fit_ipcw(data, n_grid_points=80)
+    fitted = est.get_fit()
+    assert est.n_grid_points == 80
+    assert fitted.fitting_n_grid_points == 80
+    assert fitted.n_cells == int(np.asarray(est.grid_points).size - 1)
+    assert fitted.n_cells == 1999
+    reloaded = RightCensoredHALFit.from_state(fitted.to_state())
+    assert reloaded.fitting_n_grid_points == 80
+    assert reloaded.n_cells == 1999
+
+
+def test_fit_object_rejects_mutation_and_invalid_state() -> None:
+    fitted = RightCensoredHALFit(
+        theta=np.array([0.25, 0.0], dtype=float),
+        knots=np.array([0.4], dtype=float),
+        selected_knots=np.array([0.4], dtype=float),
+        basis_order=0,
+        norm_shift=0.25,
+        norm_Z=1.2,
+        last_failure=0.7,
+        normalizer_method="midpoint",
+        n_cells=80,
+        fitting_n_grid_points=80,
+    )
+    with pytest.raises(ValueError, match="read-only"):
+        fitted.theta[0] = 1.0
+    with pytest.raises(FrozenInstanceError):
+        fitted.norm_Z = 2.0
+
+    state = fitted.to_state()
+    bad_version = dict(state, schema_version=999)
+    with pytest.raises(ValueError, match="schema_version"):
+        RightCensoredHALFit.from_state(bad_version)
+    bad_z = dict(state, norm_Z=float("nan"))
+    with pytest.raises(ValueError, match="norm_Z"):
+        RightCensoredHALFit.from_state(bad_z)
+    bad_method = dict(state, normalizer_method="linspace")
+    with pytest.raises(ValueError, match="normalizer_method"):
+        RightCensoredHALFit.from_state(bad_method)
