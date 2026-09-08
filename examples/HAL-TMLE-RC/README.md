@@ -1,5 +1,7 @@
 # HAL-TMLE Right-Censoring Examples
 
+The fitted-distribution API (`estimator.get_fit()`, then `density` / `survival` / `rmst`) is demonstrated in [example_right_censored_fit_object.ipynb](../example_right_censored_fit_object.ipynb).
+
 Start with [hal-tmle-rc-target-learning.ipynb](/Users/houyilong/GitHub/HALDensity/examples/HAL-TMLE-RC/hal-tmle-rc-target-learning.ipynb). It is the new unified demo notebook for the right-censored target-learning workflow.
 
 What this notebook does:

@@ -21,6 +21,7 @@ import pandas as pd
 
 from haldensity.estimation.base_estimator import BaseEstimator
 from haldensity.utils.basis import create_basis_functions
+from haldensity.censoring.right.fit import RightCensoredHALFit, last_failure_from_frame
 
 
 def build_right_censored_knot_grid(
@@ -272,6 +273,8 @@ class _RightCensoredObservedBase(BaseEstimator):
         self._norm_shift: Optional[float] = None
         self._norm_Z: Optional[float] = None
         self._density_midpoints: Optional[np.ndarray] = None
+        self._last_failure: Optional[float] = None
+        self._rc_fit: Optional[RightCensoredHALFit] = None
         self._recovery_count: int = 0
         self.optimization_history_: list[dict[str, float | int]] = []
 
@@ -313,6 +316,10 @@ class _RightCensoredObservedBase(BaseEstimator):
         delta_col: str,
         grid_points_override: Optional[np.ndarray],
     ) -> tuple[np.ndarray, int]:
+        self._rc_fit = None
+        self._last_failure = last_failure_from_frame(
+            data, time_col=time_col, delta_col=delta_col
+        )
         problem = _build_right_censored_observed_problem(
             data,
             n_grid_points=self.n_grid_points,
@@ -420,6 +427,12 @@ class _RightCensoredObservedBase(BaseEstimator):
         if not self.is_fitted:
             raise ValueError("Estimator must be fitted before getting density.")
         return self._normalized_density(points)
+
+    def get_fit(self) -> RightCensoredHALFit:
+        """Return the fitted distribution with frozen normalization constants."""
+        if self._rc_fit is None:
+            self._rc_fit = RightCensoredHALFit.from_estimator(self)
+        return self._rc_fit
 
 
 class RightCensoredObservedFISTAEstimator(_RightCensoredObservedBase):

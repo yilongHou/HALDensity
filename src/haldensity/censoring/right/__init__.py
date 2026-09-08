@@ -10,6 +10,7 @@ from .estimators import (
     RightCensoredEMEstimator,
     RightCensoredEMStage,
 )
+from .fit import RightCensoredHALFit
 from .observed_mle import (
     build_right_censored_knot_grid,
     RightCensoredObservedFISTAEstimator,
@@ -29,6 +30,7 @@ __all__ = [
     "KaplanMeier",
     "compute_ipcw_weights",
     "build_right_censored_knot_grid",
+    "RightCensoredHALFit",
     # Estimators
     "RightCensoredInitEstimator",
     "RightCensoredEMEstimator",

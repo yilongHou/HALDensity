@@ -20,6 +20,7 @@ from haldensity.censoring.right.estimators import (
     RightCensoredInitEstimator,
     RightCensoredEMStage,
 )
+from haldensity.censoring.right.fit import RightCensoredHALFit
 from haldensity.censoring.right.observed_mle import (
     RightCensoredObservedFISTAEstimator,
     RightCensoredObservedFPGDEstimator,
@@ -820,6 +821,13 @@ class RightCensoredObservedL1Tuner:
         self.conservative_params: Optional[Dict[str, Any]] = None
         self.path_factors_: Optional[list[float]] = None
         self.path_anchor_factor_: Optional[float] = None
+        self.estimator_: Any = None
+
+    def get_fit(self) -> RightCensoredHALFit:
+        """Return the selected CVL1MLE fitted distribution."""
+        if self.estimator_ is None:
+            raise RuntimeError("Tuner must be optimized before get_fit()")
+        return self.estimator_.get_fit()
 
     @staticmethod
     def _default_factor_grid() -> list[float]:
@@ -1179,6 +1187,7 @@ class RightCensoredObservedL1Tuner:
         if selected_factor not in full_estimators:
             raise RuntimeError("Failed to recover the selected full-data CVL1MLE estimator")
         estimator = full_estimators[selected_factor]
+        self.estimator_ = estimator
 
         metadata = {
             "best_metric_value": self.best_metric_value,
