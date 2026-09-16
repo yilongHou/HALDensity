@@ -31,7 +31,7 @@ pip install -e .
 Or install directly from GitHub:
 
 ```bash
-pip install "git+https://github.com/zhengpu-berkeley/HALDensity.git"
+pip install "git+https://github.com/yilongHou/HALDensity.git"
 ```
 
 Quickstart

@@ -32,9 +32,9 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/zhengpu-berkeley/HALDensity"
-Repository = "https://github.com/zhengpu-berkeley/HALDensity"
-Issues = "https://github.com/zhengpu-berkeley/HALDensity/issues"
+Homepage = "https://github.com/yilongHou/HALDensity"
+Repository = "https://github.com/yilongHou/HALDensity"
+Issues = "https://github.com/yilongHou/HALDensity/issues"
 
 [project.optional-dependencies]
 cvx = ["cvxpy>=1.7", "ecos>=2.0.12", "scs>=3.2", "clarabel>=0.9"]
