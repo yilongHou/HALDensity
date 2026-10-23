@@ -78,6 +78,7 @@ class OptunaHyperparameterTuner:
         silent: bool = True,
         show_progress: bool = False,
         param_overrides: Optional[dict[str, Any]] = None,
+        estimator_kwargs: Optional[dict[str, Any]] = None,
     ):
         """
         Initialize the hyperparameter tuner.
@@ -97,6 +98,12 @@ class OptunaHyperparameterTuner:
                 - categorical: {"choices": [..]} or a list, or a single fixed value
                 - float/int: {"low": ..., "high": ..., "log": bool (optional), "step": ... (optional)}
                   or a tuple/list (low, high), or a single fixed value
+            estimator_kwargs: Optional fixed (not tuned) keyword arguments passed to every
+                estimator the tuner builds, in the CV folds and in fit_best_model(), so both
+                use the same settings. By default CVXPYEstimator uses its own solver defaults
+                (primary solver plus fallback waterfall). For the old ECOS-only behaviour pass
+                {"solver": "ECOS", "use_secondary_solver": False}. Keys must not overlap the
+                tuned parameters; fix those with param_overrides instead.
         """
         if estimator_name not in ESTIMATORS:
             raise ValueError(f"Estimator '{estimator_name}' not supported. "
@@ -118,7 +125,8 @@ class OptunaHyperparameterTuner:
         self.silent = silent
         self.show_progress = show_progress
         self.param_overrides: dict[str, Any] = param_overrides or {}
-        
+        self.estimator_kwargs: dict[str, Any] = dict(estimator_kwargs or {})
+
         # Cross-validation setup
         self.kfold = KFold(n_splits=cv_folds, shuffle=True, random_state=random_state)
         
@@ -126,7 +134,8 @@ class OptunaHyperparameterTuner:
         self.study: Optional[optuna.Study] = None
         self.best_params: Optional[dict[str, Any]] = None
         self.best_metric_value: Optional[float] = None
-        
+        self._fold_errors: list[str] = []
+
         if not silent:
             print(f"Initialized tuner for {estimator_name}")
             print(f"Dataset size: {len(data)} samples")
@@ -307,7 +316,6 @@ class OptunaHyperparameterTuner:
             params = {
                 "basis_order": self._suggest_param(trial, "basis_order", "categorical", choices=[0, 1, 2]),
                 "norm_constraint": self._suggest_param(trial, "norm_constraint", "float", low=1e-3, high=1e6, log=True),
-                "use_secondary_solver": False
             }
             
         elif self.estimator_name == "FISTAEstimator":
@@ -382,7 +390,14 @@ class OptunaHyperparameterTuner:
             }
         else:
             raise ValueError(f"Hyperparameter ranges not defined for {self.estimator_name}")
-        
+
+        overlap = sorted(set(params) & set(self.estimator_kwargs))
+        if overlap:
+            raise ValueError(
+                f"estimator_kwargs {overlap} overlap tuned parameters; fix them with param_overrides instead."
+            )
+        params.update(self.estimator_kwargs)
+
         return params
 
     def _evaluate_params_cv(self, params: dict[str, Any]) -> float:
@@ -418,10 +433,12 @@ class OptunaHyperparameterTuner:
                 if np.isfinite(score):
                     cv_scores.append(score)
                 else:
+                    self._fold_errors.append(f"fold {fold_idx}: non-finite score {score}")
                     if not self.silent:
                         print(f"Warning: Non-finite score {score} in fold {fold_idx}")
-                    
+
             except Exception as e:
+                self._fold_errors.append(f"fold {fold_idx}: {type(e).__name__}: {e}")
                 if not self.silent:
                     print(f"Warning: Error in fold {fold_idx}: {e}")
                 continue
@@ -477,6 +494,8 @@ class OptunaHyperparameterTuner:
             print(f"Trials: {n_trials}")
             print(f"Metric: {self.metric}")
         
+        self._fold_errors = []
+
         # Create Optuna study
         direction = "minimize"  # Always minimize (we negate SLL if needed)
         study_name = f"{self.estimator_name}_{self.metric}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -515,6 +534,15 @@ class OptunaHyperparameterTuner:
                 show_progress_bar=False
             )
         
+        # A trial whose every fold failed scores +inf; if no trial is finite the
+        # "best" parameters would just be the first trial's, so fail loudly instead.
+        if not any(t.value is not None and np.isfinite(t.value) for t in self.study.trials):
+            distinct_errors = list(dict.fromkeys(self._fold_errors))
+            raise RuntimeError(
+                f"All {len(self.study.trials)} CV trials failed: no fold produced a finite "
+                f"{self.metric} score. First errors: {distinct_errors[:3]}"
+            )
+
         # Extract results
         self.best_params = self.study.best_params.copy()
         best_objective_value = self.study.best_value
@@ -556,7 +584,7 @@ class OptunaHyperparameterTuner:
             print(f"Parameters: {self.best_params}")
         
         # Create estimator with best params
-        best_estimator = self.estimator_class(**self.best_params)
+        best_estimator = self.estimator_class(**{**self.best_params, **self.estimator_kwargs})
         
         # Fit on full data
         best_estimator.fit(self.data)
