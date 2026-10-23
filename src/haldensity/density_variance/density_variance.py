@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from scipy.integrate import trapezoid
 from scipy.stats import norm
 import warnings
 
@@ -50,10 +51,10 @@ def estimate_covariance_beta(
     density_unnorm = np.exp(log_density_integration - max_log_density)
 
     dx = integration_grid[1] - integration_grid[0]
-    normalizing_constant = np.trapz(density_unnorm, dx=dx)
+    normalizing_constant = trapezoid(density_unnorm, dx=dx)
     density_integration = density_unnorm / normalizing_constant
 
-    expected_phi = np.trapz(
+    expected_phi = trapezoid(
         phi_integration_selected * density_integration[:, np.newaxis],
         dx=dx,
         axis=0,
@@ -120,14 +121,14 @@ def density_confidence_interval(
     density_unnorm = np.exp(log_density_integration - max_log_density)
 
     dx = integration_grid[1] - integration_grid[0]
-    normalizing_constant = np.trapz(density_unnorm, dx=dx)
+    normalizing_constant = trapezoid(density_unnorm, dx=dx)
     density_integration = density_unnorm / normalizing_constant
 
     log_density_eval = phi_eval_selected @ theta_hat
     log_Z = np.log(normalizing_constant) + max_log_density
     density_eval = np.exp(log_density_eval - log_Z)
 
-    expected_phi = np.trapz(
+    expected_phi = trapezoid(
         phi_integration_selected * density_integration[:, np.newaxis],
         dx=dx,
         axis=0,

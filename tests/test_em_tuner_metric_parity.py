@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import pytest
+from scipy.integrate import trapezoid
 
 from haldensity.censoring import (
     IntervalCensoredEMTuner,
@@ -94,7 +95,7 @@ def _assert_density_validity(estimator, label: str) -> None:
     assert float(np.min(density)) >= -1e-12, f"{label}: negative density encountered"
 
     # External numerical integration on a fine grid.
-    area_trapz = float(np.trapz(density, grid))
+    area_trapz = float(trapezoid(density, grid))
     assert 0.9 <= area_trapz <= 1.1, f"{label}: trapz area out of range ({area_trapz})"
 
     # Internal normalization consistency on the estimator's own integration grid.

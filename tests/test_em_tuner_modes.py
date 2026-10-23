@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import pytest
+from scipy.integrate import trapezoid
 
 import haldensity.censoring.tuners.right_tuners as right_tuners_module
 from haldensity.censoring import (
@@ -218,7 +219,7 @@ def test_right_cv_oversmooth_estimator_produces_valid_density() -> None:
     grid = np.linspace(0.001, 0.999, 500)
     density = np.asarray(result.estimator.get_density_at_points(grid), dtype=float)
     assert float(np.min(density)) >= -1e-12
-    area = float(np.trapz(density, grid))
+    area = float(trapezoid(density, grid))
     assert 0.85 <= area <= 1.15
 
 
@@ -401,7 +402,7 @@ def test_right_cv_observed_l1_estimator_produces_valid_density() -> None:
     grid = np.linspace(0.001, 0.999, 400)
     density = np.asarray(result.estimator.get_density_at_points(grid), dtype=float)
     assert float(np.min(density)) >= -1e-12
-    area = float(np.trapz(density, grid))
+    area = float(trapezoid(density, grid))
     assert 0.85 <= area <= 1.15
 
 
@@ -503,5 +504,5 @@ def test_cv_oversmooth_estimator_produces_valid_density() -> None:
     grid = np.linspace(0.001, 0.999, 500)
     density = np.asarray(result.estimator.get_density_at_points(grid), dtype=float)
     assert float(np.min(density)) >= -1e-12
-    area = float(np.trapz(density, grid))
+    area = float(trapezoid(density, grid))
     assert 0.85 <= area <= 1.15
