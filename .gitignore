@@ -61,3 +61,7 @@ local/**
 uv.lock
 
 examples/local/**
+examples/**/local/
+
+# Matplotlib cache written when MPLCONFIGDIR points into the repo
+.matplotlib/
