@@ -74,3 +74,25 @@ def test_estimator_kwargs_must_not_overlap_tuned_parameters():
 
     with pytest.raises(ValueError, match="overlap tuned parameters"):
         tuner.optimize(n_trials=1, show_progress=False)
+
+
+def test_final_fit_uses_the_best_trials_full_settings(mosek_unavailable):
+    tuner = _tuner(estimator_kwargs={"solver": "ECOS", "use_secondary_solver": False})
+    tuner.optimize(n_trials=2, show_progress=False)
+
+    assert "basis_order" not in tuner.best_params  # fixed override, not suggested by Optuna
+    assert tuner.best_estimator_params["basis_order"] == 1
+    best = tuner.fit_best_model()
+    assert best.basis_order == 1
+    assert best.norm_constraint == pytest.approx(tuner.best_params["norm_constraint"])
+
+
+def test_final_fit_accepts_composite_arguments():
+    tuner = OptunaHyperparameterTuner(
+        "ProximalNewtonLBFGSEstimator", _data(), cv_folds=2, random_state=1, max_iter=50
+    )
+    tuner.optimize(n_trials=1, show_progress=False)
+
+    best = tuner.fit_best_model()  # lbfgs_gamma_clip_min/max must be rebuilt into one tuple
+    assert isinstance(tuner.best_estimator_params["lbfgs_gamma_clip_range"], tuple)
+    assert best.n_iterations == 50

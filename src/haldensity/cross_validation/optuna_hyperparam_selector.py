@@ -134,6 +134,9 @@ class OptunaHyperparameterTuner:
         self.study: Optional[optuna.Study] = None
         self.best_params: Optional[dict[str, Any]] = None
         self.best_metric_value: Optional[float] = None
+        # Full keyword arguments of the best trial's estimator (tuned, fixed and estimator_kwargs)
+        self.best_estimator_params: Optional[dict[str, Any]] = None
+        self._trial_estimator_params: dict[int, dict[str, Any]] = {}
         self._fold_errors: list[str] = []
 
         if not silent:
@@ -461,7 +464,8 @@ class OptunaHyperparameterTuner:
         """
         # Suggest hyperparameters
         params = self._suggest_hyperparameters(trial)
-        
+        self._trial_estimator_params[trial.number] = dict(params)
+
         # Evaluate using cross-validation
         metric_value = self._evaluate_params_cv(params)
         
@@ -495,6 +499,7 @@ class OptunaHyperparameterTuner:
             print(f"Metric: {self.metric}")
         
         self._fold_errors = []
+        self._trial_estimator_params = {}
 
         # Create Optuna study
         direction = "minimize"  # Always minimize (we negate SLL if needed)
@@ -545,6 +550,7 @@ class OptunaHyperparameterTuner:
 
         # Extract results
         self.best_params = self.study.best_params.copy()
+        self.best_estimator_params = dict(self._trial_estimator_params[self.study.best_trial.number])
         best_objective_value = self.study.best_value
         
         # Convert back to original metric scale
@@ -562,6 +568,7 @@ class OptunaHyperparameterTuner:
         
         return {
             "best_params": self.best_params,
+            "best_estimator_params": self.best_estimator_params,
             "best_metric_value": self.best_metric_value,
             "n_trials": len(self.study.trials),
             "study": self.study
@@ -584,7 +591,14 @@ class OptunaHyperparameterTuner:
             print(f"Parameters: {self.best_params}")
         
         # Create estimator with best params
-        best_estimator = self.estimator_class(**{**self.best_params, **self.estimator_kwargs})
+        # Refit with exactly the settings the best trial was cross-validated with.
+        # study.best_params alone misses fixed overrides (e.g. basis_order), max_iter
+        # and composite arguments such as lbfgs_gamma_clip_range.
+        if self.best_estimator_params is not None:
+            params = dict(self.best_estimator_params)
+        else:
+            params = {**self.best_params, **self.estimator_kwargs}
+        best_estimator = self.estimator_class(**params)
         
         # Fit on full data
         best_estimator.fit(self.data)
@@ -615,6 +629,7 @@ class OptunaHyperparameterTuner:
                 "random_state": self.random_state
             },
             "best_hyperparameters": self.best_params,
+            "best_estimator_params": self.best_estimator_params,
             "best_metric_value": self.best_metric_value,
             "data_size": len(self.data),
             "optimization_timestamp": datetime.now().isoformat()
