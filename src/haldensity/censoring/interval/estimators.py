@@ -174,7 +174,7 @@ class IntervalCensoredInitEstimator(BaseEstimator):
                 except Exception as exc:  # pragma: no cover
                     raise ImportError(
                         "knot_strategy='turnbull' requires the optional dependency 'lifelines'. "
-                        "Install it (e.g. add lifelines to your environment) and retry."
+                        "Install it with: pip install 'haldensity[turnbull]'."
                     ) from exc
 
                 if L_col not in data.columns or R_col not in data.columns:
@@ -445,7 +445,8 @@ class IntervalCensoredFISTAEstimator(BaseEstimator):
                 from lifelines import KaplanMeierFitter  # type: ignore
             except Exception as exc:  # pragma: no cover
                 raise ImportError(
-                    "knot_strategy='turnbull' requires the optional dependency 'lifelines'."
+                    "knot_strategy='turnbull' requires the optional dependency 'lifelines'. "
+                    "Install it with: pip install 'haldensity[turnbull]'."
                 ) from exc
 
             if L_col not in data.columns or R_col not in data.columns:

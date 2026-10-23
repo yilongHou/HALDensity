@@ -110,7 +110,8 @@ class IntervalCensoredInitTuner(BaseCensoredInitTuner):
                 from lifelines import KaplanMeierFitter  # type: ignore
             except Exception as exc:  # pragma: no cover
                 raise ImportError(
-                    "init_knot_strategy='turnbull' requires the optional dependency 'lifelines'."
+                    "init_knot_strategy='turnbull' requires the optional dependency 'lifelines'. "
+                    "Install it with: pip install 'haldensity[turnbull]'."
                 ) from exc
 
             L = np.asarray(self.data[self.L_col].values, dtype=float).ravel()
