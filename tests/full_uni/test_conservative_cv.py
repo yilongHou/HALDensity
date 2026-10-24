@@ -36,7 +36,8 @@ def test_thresholds():
 
 def test_full_data_cv_moves_to_the_smallest_bound_above_the_threshold(data):
     tuner = OptunaHyperparameterTuner("CVXPYEstimator", data, cv_folds=3, random_state=0,
-                                      param_overrides={"basis_order": 1, "norm_constraint": (1.0, 200.0)})
+                                      param_overrides={"basis_order": 1, "norm_constraint": (1.0, 200.0)},
+                                      use_conservative_adjustment=True)
     result = tuner.optimize(n_trials=6, show_progress=False)
 
     best_m = tuner.max_cv_params["norm_constraint"]
@@ -61,7 +62,22 @@ def test_adjustment_can_be_switched_off(data):
 
 def test_penalty_tuned_estimators_are_not_adjusted(data):
     tuner = OptunaHyperparameterTuner("FISTAEstimator", data, cv_folds=2, random_state=0, max_iter=50,
-                                      param_overrides={"basis_order": 1})
+                                      param_overrides={"basis_order": 1}, use_conservative_adjustment=True)
     tuner.optimize(n_trials=2, show_progress=False)
     assert tuner.conservative_params is None
     assert "not tuned by norm_constraint" in tuner.adjustment_note
+
+
+def test_auto_adjusts_only_basis_order_zero(data):
+    common = dict(cv_folds=3, random_state=0)
+    k0 = OptunaHyperparameterTuner("CVXPYEstimator", data, param_overrides={"basis_order": 0}, **common)
+    k0.optimize(n_trials=4, show_progress=False)
+    assert k0.conservative_params is not None and k0.adjustment_results
+
+    k1 = OptunaHyperparameterTuner("CVXPYEstimator", data, param_overrides={"basis_order": 1}, **common)
+    k1.optimize(n_trials=4, show_progress=False)
+    assert k1.conservative_params is None and "basis_order 0" in k1.adjustment_note
+    assert k1.best_params["norm_constraint"] == k1.max_cv_params["norm_constraint"]
+
+    with pytest.raises(ValueError, match="True, False or 'auto'"):
+        OptunaHyperparameterTuner("CVXPYEstimator", data, use_conservative_adjustment="always")

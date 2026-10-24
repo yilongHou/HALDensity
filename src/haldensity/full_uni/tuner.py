@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 import json
 import os
-from typing import Optional, Tuple, Any
+from typing import Optional, Tuple, Any, Union
 from datetime import datetime
 from scipy.interpolate import interp1d
 import warnings
@@ -79,7 +79,7 @@ class OptunaHyperparameterTuner:
         param_overrides: Optional[dict[str, Any]] = None,
         estimator_kwargs: Optional[dict[str, Any]] = None,
         cv_scoring: str = "exact",
-        use_conservative_adjustment: bool = TUNER_DEFAULTS.use_conservative_adjustment,
+        use_conservative_adjustment: Union[bool, str] = "auto",
         conservative_selection_rule: str = TUNER_DEFAULTS.conservative_selection_rule,
         conservative_k_percent: float = TUNER_DEFAULTS.conservative_k_percent,
         conservative_se_multiplier: float = TUNER_DEFAULTS.conservative_se_multiplier,
@@ -122,9 +122,11 @@ class OptunaHyperparameterTuner:
             use_conservative_adjustment: After the CV search, move to the smallest bound
                 (norm_constraint) whose mean CV log-likelihood is at least the threshold below the
                 best (haldensity.core.cv.conservative; bracketing then bisection in log M), as the
-                censored-data tuners do. On by default. Applies to estimators tuned by
-                norm_constraint (CVXPYEstimator) with metric "sll"; otherwise it is skipped and
-                `adjustment_note` says why. The CV-best parameters stay in `max_cv_params`. See
+                censored-data tuners do. "auto" (default, interim): only when the CV-best basis
+                order is 0, where nearly collinear indicator bases make the CV curve flat; True /
+                False force it on / off. Applies to estimators tuned by norm_constraint
+                (CVXPYEstimator) with metric "sll"; otherwise it is skipped and `adjustment_note`
+                says why. The CV-best parameters stay in `max_cv_params`. See
                 docs/dev/cvll-multicollinearity for why a flat CV curve makes this necessary.
             conservative_selection_rule, conservative_k_percent, conservative_se_multiplier:
                 threshold = best - k_percent * SD ("legacy_percent_sd", default) or
@@ -157,7 +159,9 @@ class OptunaHyperparameterTuner:
         self.param_overrides: dict[str, Any] = param_overrides or {}
         self.estimator_kwargs: dict[str, Any] = dict(estimator_kwargs or {})
         self.cv_scoring = cv_scoring
-        self.use_conservative_adjustment = bool(use_conservative_adjustment)
+        if not (isinstance(use_conservative_adjustment, bool) or use_conservative_adjustment == "auto"):
+            raise ValueError("use_conservative_adjustment must be True, False or 'auto'")
+        self.use_conservative_adjustment = use_conservative_adjustment
         self.conservative_selection_rule = str(conservative_selection_rule).strip().lower()
         if self.conservative_selection_rule not in SELECTION_RULES:
             raise ValueError(f"conservative_selection_rule must be one of {SELECTION_RULES}")
@@ -636,7 +640,9 @@ class OptunaHyperparameterTuner:
             self.best_metric_value = best_objective_value
 
         self.max_cv_params = dict(self.best_estimator_params)
-        if self.use_conservative_adjustment:
+        if self.use_conservative_adjustment == "auto" and int(self.best_estimator_params.get("basis_order", 0)) != 0:
+            self.adjustment_note = "skipped: use_conservative_adjustment='auto' adjusts only basis_order 0"
+        elif self.use_conservative_adjustment:
             self._apply_conservative_adjustment(self.study.best_trial.number)
         
         if not self.silent:
