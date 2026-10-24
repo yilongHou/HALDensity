@@ -1,0 +1,224 @@
+import numpy as np
+
+from haldensity.rc.comparison import (
+    fit_right_censored_initial_estimator,
+    run_right_censored_initial_estimator_experiment,
+    simulate_beta_uniform_right_censored,
+    simulate_truncnorm_uniform_right_censored,
+)
+from haldensity.rc.observed_mle import (
+    RightCensoredObservedFISTAEstimator,
+    RightCensoredObservedFPGDEstimator,
+)
+
+
+def _make_data(n: int = 48, seed: int = 17):
+    sim = simulate_beta_uniform_right_censored(n=n, seed=seed)
+    return sim["observed_data"], sim["truth"]
+
+
+def test_right_censored_observed_estimators_fit_valid_density():
+    data, _ = _make_data()
+
+    fista = RightCensoredObservedFISTAEstimator(
+        lam=0.02,
+        n_iterations=60,
+        ll_change_tol=1e-4,
+        n_grid_points=80,
+        basis_order=0,
+    ).fit(data)
+    fpgd = RightCensoredObservedFPGDEstimator(
+        norm_constraint=8.0,
+        n_iterations=80,
+        ll_change_tol=1e-4,
+        learning_rate=0.1,
+        n_grid_points=80,
+        basis_order=0,
+    ).fit(data)
+
+    for estimator in (fista, fpgd):
+        _, density = estimator.get_density()
+        density_mass = float(np.sum(density * estimator.delta_j))
+        assert np.isclose(density_mass, 1.0, atol=1e-5)
+        results = estimator.get_results()
+        assert int(results["n_iterations_run"]) > 0
+        assert "recovery_count" in results
+        assert "optimization_history" in results
+
+
+def test_truncnorm_uniform_right_censored_simulator_returns_valid_truth():
+    sim = simulate_truncnorm_uniform_right_censored(
+        n=64,
+        seed=29,
+        event_mean=0.55,
+        event_sd=0.12,
+        censor_low=0.0,
+        censor_high=1.2,
+    )
+
+    observed_data = sim["observed_data"]
+    event_times = np.asarray(sim["event_times"], dtype=float)
+    truth = sim["truth"]
+    eval_points = np.array([0.0, 0.25, 0.5, 0.75, 1.0], dtype=float)
+    truth_density = np.asarray(truth.density_fn(eval_points), dtype=float)
+    truth_survival = np.asarray(truth.survival_fn(eval_points), dtype=float)
+
+    assert observed_data.shape == (64, 2)
+    assert set(observed_data.columns) == {"T", "Delta"}
+    assert np.all((event_times >= 0.0) & (event_times <= 1.0))
+    assert np.all(np.isfinite(truth_density))
+    assert np.all(truth_density >= 0.0)
+    assert np.all(np.isfinite(truth_survival))
+    assert np.all((truth_survival >= 0.0) & (truth_survival <= 1.0))
+    assert np.all(np.diff(truth_survival) <= 1e-10)
+    assert np.isclose(truth_survival[0], 1.0, atol=1e-8)
+    assert truth.name.startswith("TruncNorm(")
+
+
+def test_right_censored_observed_estimators_recover_from_one_unstable_step():
+    data, _ = _make_data(seed=19)
+
+    class OneRecoveryFISTA(RightCensoredObservedFISTAEstimator):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._forced_recovery_done = False
+
+        def _objective_is_unstable(self, obj: float) -> bool:
+            if not self._forced_recovery_done and np.isfinite(obj):
+                self._forced_recovery_done = True
+                return True
+            return super()._objective_is_unstable(obj)
+
+    class OneRecoveryFPGD(RightCensoredObservedFPGDEstimator):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._forced_recovery_done = False
+
+        def _objective_is_unstable(self, obj: float) -> bool:
+            if not self._forced_recovery_done and np.isfinite(obj):
+                self._forced_recovery_done = True
+                return True
+            return super()._objective_is_unstable(obj)
+
+    fista = OneRecoveryFISTA(
+        lam=0.02,
+        n_iterations=60,
+        ll_change_tol=1e-4,
+        n_grid_points=80,
+        basis_order=0,
+    ).fit(data)
+    fpgd = OneRecoveryFPGD(
+        norm_constraint=8.0,
+        n_iterations=80,
+        ll_change_tol=1e-4,
+        learning_rate=0.1,
+        n_grid_points=80,
+        basis_order=0,
+    ).fit(data)
+
+    for estimator in (fista, fpgd):
+        results = estimator.get_results()
+        assert int(results["n_iterations_run"]) > 0
+        assert int(results["recovery_count"]) >= 1
+        _, density = estimator.get_density()
+        density_mass = float(np.sum(density * estimator.delta_j))
+        assert np.isclose(density_mass, 1.0, atol=1e-5)
+
+
+def test_right_censored_method_specific_fit_interface():
+    data, _ = _make_data(seed=21)
+    method_overrides = {
+        "M1": {"basis_order": [0], "norm_constraint": {"low": 3.0, "high": 6.0, "log": False}},
+        "M2": {"basis_order": [0], "norm_constraint": {"low": 3.0, "high": 6.0, "log": False}},
+        "M3": {"basis_order": [0], "lam": {"low": 0.01, "high": 0.05, "log": False}},
+        "M4": {"basis_order": [0], "norm_constraint": {"low": 3.0, "high": 6.0, "log": False}},
+    }
+
+    fit_m1 = fit_right_censored_initial_estimator(
+        "M1",
+        data,
+        cv_folds=2,
+        n_trials=2,
+        n_grid_points=80,
+        random_state=2,
+        param_overrides=method_overrides["M1"],
+        init_tuner_kwargs={"silent": True, "use_conservative_adjustment": False},
+    )
+    fit_m2 = fit_right_censored_initial_estimator(
+        "M2",
+        data,
+        cv_folds=2,
+        n_trials=2,
+        n_grid_points=80,
+        random_state=2,
+        param_overrides=method_overrides["M2"],
+        init_tuner_kwargs={"silent": True, "use_conservative_adjustment": False},
+    )
+
+    assert fit_m1.metadata["validation_metric"] == "observed_loglik"
+    assert fit_m2.metadata["validation_metric"] == "ipcw_loglik"
+    assert fit_m1.estimator.is_fitted
+    assert fit_m2.estimator.is_fitted
+
+
+def test_right_censored_init_tuner_accepts_one_se_conservative_rule():
+    data, _ = _make_data(seed=27)
+    overrides = {"basis_order": [0], "norm_constraint": {"low": 3.0, "high": 6.0, "log": False}}
+
+    fit_m2 = fit_right_censored_initial_estimator(
+        "M2",
+        data,
+        cv_folds=2,
+        n_trials=2,
+        n_grid_points=80,
+        random_state=5,
+        param_overrides=overrides,
+        init_tuner_kwargs={
+            "silent": True,
+            "use_conservative_adjustment": True,
+            "conservative_selection_rule": "one_se",
+            "conservative_se_multiplier": 1.0,
+        },
+    )
+
+    assert fit_m2.metadata["conservative_selection_rule"] == "one_se"
+    assert fit_m2.metadata["conservative_se_multiplier"] == 1.0
+    assert fit_m2.metadata["conservative_params"] is not None
+
+
+def test_right_censored_experiment_runner_supports_tmle_for_m1_to_m4():
+    data, truth = _make_data(seed=31)
+    target_times = np.array([0.25, 0.5])
+    method_overrides = {
+        "M1": {"basis_order": [0], "norm_constraint": {"low": 3.0, "high": 6.0, "log": False}},
+        "M2": {"basis_order": [0], "norm_constraint": {"low": 3.0, "high": 6.0, "log": False}},
+        "M3": {"basis_order": [0], "lam": {"low": 0.01, "high": 0.05, "log": False}},
+        "M4": {"basis_order": [0], "norm_constraint": {"low": 3.0, "high": 6.0, "log": False}},
+    }
+
+    result = run_right_censored_initial_estimator_experiment(
+        data,
+        truth=truth,
+        target_times=target_times,
+        cv_folds=2,
+        n_trials=2,
+        random_state=3,
+        n_grid_points=80,
+        method_param_overrides=method_overrides,
+        init_tuner_kwargs={"silent": True, "use_conservative_adjustment": False},
+        fista_kwargs={"n_iterations": 60, "ll_change_tol": 1e-4},
+        fpgd_kwargs={"n_iterations": 80, "ll_change_tol": 1e-4, "learning_rate": 0.1},
+        run_tmle=True,
+        tmle_kwargs={"store_pointwise_arrays": False},
+    )
+
+    initial_summary = result["initial_summary"]
+    tmle_summary = result["tmle_summary"]
+    assert set(initial_summary["method"]) == {"M1", "M2", "M3", "M4"}
+    assert set(tmle_summary["method"]) == {"M1", "M2", "M3", "M4"}
+    assert len(tmle_summary) == 8
+    assert np.all(np.isfinite(tmle_summary["psi_init"]))
+    assert np.all(np.isfinite(tmle_summary["psi_star"]))
+    assert np.all(np.isfinite(tmle_summary["epsilon"]))
+    assert np.all(np.isfinite(tmle_summary["standard_error"]))
+    assert np.all(np.isfinite(tmle_summary["targeted_abs_error"]))

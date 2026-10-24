@@ -1,0 +1,507 @@
+import numpy as np
+import pandas as pd
+import pytest
+from scipy.integrate import trapezoid
+
+import haldensity.rc.tuners as right_tuners_module
+from haldensity.ic.tuners import IntervalCensoredCVOversmoothEMTuner, IntervalCensoredEMTuner
+from haldensity.ic.estimators import IntervalCensoredInitEstimator
+from haldensity.rc.km import KaplanMeier
+from haldensity.rc.tuners import (
+    RightCensoredCVOversmoothEMTuner,
+    RightCensoredEMTuner,
+    RightCensoredObservedL1Tuner,
+)
+from haldensity.rc.estimators import RightCensoredInitEstimator
+from haldensity.rc.weights import compute_ipcw_weights
+from haldensity.datasets.censoring import interval_censor_inspection_uniform
+from haldensity.datasets.truncated_gmm import TruncatedGMM
+
+
+def _make_sampler() -> TruncatedGMM:
+    return TruncatedGMM(
+        components=[
+            {"mean": 0.2, "std": 0.05, "lower": 0.0, "upper": 1.0},
+            {"mean": 0.5, "std": 0.05, "lower": 0.0, "upper": 1.0},
+            {"mean": 0.8, "std": 0.05, "lower": 0.0, "upper": 1.0},
+        ],
+        weights=[0.33, 0.34, 0.33],
+    )
+
+
+def _make_right_censored_data(n: int = 140, seed: int = 42) -> pd.DataFrame:
+    np.random.seed(seed)
+    sampler = _make_sampler()
+    t_event = sampler.generate_samples(n)
+    t_cens = np.random.uniform(0.0, 1.0, size=n)
+    t_obs = np.minimum(t_event, t_cens)
+    delta = (t_event <= t_cens).astype(int)
+    return pd.DataFrame({"T": t_obs, "Delta": delta})
+
+
+def _make_interval_censored_data(n: int = 180, seed: int = 42) -> pd.DataFrame:
+    np.random.seed(seed)
+    sampler = _make_sampler()
+    t_event = sampler.generate_samples(n)
+    return interval_censor_inspection_uniform(t_event, n_inspections=8, random_state=seed)
+
+
+def _fit_stage1_right(data: pd.DataFrame) -> RightCensoredInitEstimator:
+    km = KaplanMeier().fit(data, time_col="T", delta_col="Delta")
+    times = np.asarray(data["T"].values, dtype=float)
+    delta = np.asarray(data["Delta"].values, dtype=int)
+    weights = compute_ipcw_weights(times, delta, lambda t: np.atleast_1d(km.predict(t)))
+    unc = delta == 1
+
+    est = RightCensoredInitEstimator(
+        norm_constraint=10.0,
+        n_grid_points=100,
+        basis_order=0,
+        solver="ECOS",
+        use_secondary_solver=True,
+    )
+    est.fit(pd.DataFrame({"W1": times[unc]}), sample_weights=weights[unc])
+    return est
+
+
+def _fit_stage1_interval(data: pd.DataFrame) -> IntervalCensoredInitEstimator:
+    return IntervalCensoredInitEstimator(
+        norm_constraint=10.0,
+        n_grid_points=100,
+        basis_order=0,
+        solver="ECOS",
+        use_secondary_solver=True,
+        include_intercept_in_constraint=False,
+    ).fit(data, L_col="L", R_col="R")
+
+
+def test_stage2_tuners_no_longer_accept_cv_folds() -> None:
+    right_data = _make_right_censored_data()
+    right_stage1 = _fit_stage1_right(right_data)
+    with pytest.raises(TypeError):
+        RightCensoredEMTuner(
+            right_data,
+            stage1_estimator=right_stage1,
+            do_over_smooth=False,
+            cv_folds=3,
+        )
+
+    interval_data = _make_interval_censored_data()
+    interval_stage1 = _fit_stage1_interval(interval_data)
+    with pytest.raises(TypeError):
+        IntervalCensoredEMTuner(
+            interval_data,
+            stage1_estimator=interval_stage1,
+            do_over_smooth=False,
+            cv_folds=3,
+        )
+
+
+def test_no_oversmooth_mode_returns_single_factor_and_standard_params() -> None:
+    data = _make_right_censored_data()
+    stage1 = _fit_stage1_right(data)
+
+    result = RightCensoredEMTuner(
+        data,
+        stage1_estimator=stage1,
+        do_over_smooth=False,
+        em_m_imputations=20,
+        em_max_em_iter=8,
+        em_tol=1e-3,
+        em_norm_factor=1.0,
+        n_grid_points=100,
+        random_state=42,
+        silent=True,
+    ).optimize()
+
+    assert result.metadata["mode"] == "no_oversmooth"
+    assert set(result.best_params.keys()) == {"oversmooth_factor", "em_norm_factor"}
+    assert result.best_params["oversmooth_factor"] == pytest.approx(1.0)
+    assert result.best_params["em_norm_factor"] == pytest.approx(1.0)
+    assert len(result.metadata["em_records"]) == 1
+    assert result.metadata["em_records"][0].factor == pytest.approx(1.0)
+
+
+def test_no_oversmooth_warns_for_non_unit_em_norm_factor() -> None:
+    data = _make_right_censored_data()
+    stage1 = _fit_stage1_right(data)
+
+    with pytest.warns(UserWarning, match="em_norm_factor"):
+        RightCensoredEMTuner(
+            data,
+            stage1_estimator=stage1,
+            do_over_smooth=False,
+            em_m_imputations=20,
+            em_max_em_iter=8,
+            em_tol=1e-3,
+            em_norm_factor=1.3,
+            n_grid_points=100,
+            random_state=42,
+            silent=True,
+        ).optimize()
+
+
+def test_oversmooth_reuses_stage1_estimator_for_factor_one() -> None:
+    data = _make_right_censored_data()
+    stage1 = _fit_stage1_right(data)
+
+    result = RightCensoredEMTuner(
+        data,
+        stage1_estimator=stage1,
+        do_over_smooth=True,
+        oversmooth_factors=[0.7, 1.0],
+        em_m_imputations=20,
+        em_max_em_iter=8,
+        em_tol=1e-3,
+        em_norm_factor=1.5,
+        n_grid_points=100,
+        random_state=42,
+        silent=True,
+    ).optimize()
+
+    init_by_factor = {float(rec.factor): rec for rec in result.metadata["init_records"]}
+    assert init_by_factor[1.0].estimator is stage1
+
+
+def test_right_cv_oversmooth_returns_valid_result_and_metadata() -> None:
+    data = _make_right_censored_data()
+    stage1 = _fit_stage1_right(data)
+
+    result = RightCensoredCVOversmoothEMTuner(
+        data,
+        stage1_estimator=stage1,
+        cv_folds=2,
+        oversmooth_factors=[0.5, 1.0],
+        em_norm_factors=[1.0, 2.0],
+        em_m_imputations=15,
+        em_max_em_iter=5,
+        em_tol=1e-2,
+        n_grid_points=100,
+        random_state=42,
+        silent=True,
+    ).optimize(n_trials=4)
+
+    assert result.metadata["mode"] == "cv_oversmooth"
+    assert set(result.best_params.keys()) == {"oversmooth_factor", "em_norm_factor"}
+    assert 0.5 <= result.best_params["oversmooth_factor"] <= 1.0
+    assert 1.0 <= result.best_params["em_norm_factor"] <= 2.0
+
+    assert len(result.metadata["cv_records"]) == 4
+    assert result.metadata["n_trials"] == 4
+    for rec in result.metadata["cv_records"]:
+        assert len(rec.fold_scores) == 2
+        assert isinstance(rec.mean_cv_ll, float)
+        assert isinstance(rec.sd_cv_ll, float)
+
+    assert result.metadata["best_record"] is not None
+    assert result.estimator is not None
+
+
+def test_right_cv_oversmooth_estimator_produces_valid_density() -> None:
+    data = _make_right_censored_data()
+    stage1 = _fit_stage1_right(data)
+
+    result = RightCensoredCVOversmoothEMTuner(
+        data,
+        stage1_estimator=stage1,
+        cv_folds=2,
+        oversmooth_factors=[0.5, 1.0],
+        em_norm_factors=[1.0, 2.0],
+        em_m_imputations=15,
+        em_max_em_iter=5,
+        em_tol=1e-2,
+        n_grid_points=100,
+        random_state=42,
+        silent=True,
+    ).optimize(n_trials=4)
+
+    grid = np.linspace(0.001, 0.999, 500)
+    density = np.asarray(result.estimator.get_density_at_points(grid), dtype=float)
+    assert float(np.min(density)) >= -1e-12
+    area = float(trapezoid(density, grid))
+    assert 0.85 <= area <= 1.15
+
+
+def test_right_cv_observed_l1_returns_valid_result_and_metadata() -> None:
+    data = _make_right_censored_data(n=100, seed=7)
+    stage1 = _fit_stage1_right(data)
+
+    result = RightCensoredObservedL1Tuner(
+        data,
+        stage1_estimator=stage1,
+        cv_folds=2,
+        norm_constraint_factors=[1.0, 1.5],
+        random_state=42,
+        silent=True,
+        l1_kwargs={
+            "n_grid_points": 80,
+            "learning_rate": 0.1,
+            "n_iterations": 120,
+            "ll_change_tol": 1e-3,
+            "history_every": 40,
+        },
+    ).optimize(n_trials=4)
+
+    assert set(result.best_params.keys()) == {"norm_constraint_factor", "norm_constraint"}
+    assert 1.0 <= result.best_params["norm_constraint_factor"] <= 1.5
+    assert result.best_params["norm_constraint"] == pytest.approx(
+        stage1.norm_constraint * result.best_params["norm_constraint_factor"]
+    )
+    assert result.metadata["validation_metric"] == "observed_loglik"
+    assert result.metadata["cv_folds"] == 2
+    assert result.metadata["working_support_size"] == len(stage1.grid_points_hal_selected)
+    assert result.metadata["warm_start_final"] is True
+    assert result.metadata["warm_start_cv"] is True
+    assert result.metadata["requested_norm_constraint_factors"] == [1.0, 1.5]
+    assert result.metadata["n_path_points"] == 4
+    assert result.metadata["path_anchor_factor"] == pytest.approx(1.0)
+    assert len(result.metadata["resolved_norm_constraint_factors"]) == 4
+    assert isinstance(result.metadata["cv_fold_path"], pd.DataFrame)
+    assert isinstance(result.metadata["cv_path_summary"], pd.DataFrame)
+    assert isinstance(result.metadata["full_path"], pd.DataFrame)
+    assert result.estimator is not None
+
+
+def test_right_cv_observed_l1_caches_fold_warm_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    data = _make_right_censored_data(n=100, seed=19)
+    stage1 = _fit_stage1_right(data)
+    tuner = RightCensoredObservedL1Tuner(
+        data,
+        stage1_estimator=stage1,
+        cv_folds=2,
+        norm_constraint_factors=[1.0],
+        random_state=42,
+        silent=True,
+        l1_kwargs={
+            "n_grid_points": 80,
+            "learning_rate": 0.1,
+            "n_iterations": 20,
+            "ll_change_tol": 1e-3,
+            "history_every": 10,
+        },
+    )
+
+    train_idx, val_idx = tuner._fold_splits[0]
+    train_df = tuner.data.iloc[train_idx].reset_index(drop=True)
+    val_df = tuner.data.iloc[val_idx].reset_index(drop=True)
+    expected_len = 1 + max(tuner.basis_order, 0) + len(tuner.working_grid_points)
+    cached_theta = np.linspace(0.0, 1.0, expected_len, dtype=float)
+
+    build_calls: list[int] = []
+
+    def fake_build(train_df_arg: pd.DataFrame) -> np.ndarray:
+        build_calls.append(len(train_df_arg))
+        return cached_theta.copy()
+
+    monkeypatch.setattr(tuner, "_build_fold_warm_start_theta", fake_build)
+
+    theta_1 = tuner._get_fold_warm_start_theta(0, train_df)
+    theta_2 = tuner._get_fold_warm_start_theta(0, train_df)
+
+    assert build_calls == [len(train_df)]
+    assert theta_1 is not None
+    assert theta_2 is not None
+    assert np.allclose(theta_1, cached_theta)
+    assert np.allclose(theta_2, cached_theta)
+    assert theta_1 is not theta_2
+
+
+def test_right_cv_observed_l1_path_runs_anchor_then_up_then_down(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = _make_right_censored_data(n=100, seed=19)
+    stage1 = _fit_stage1_right(data)
+    tuner = RightCensoredObservedL1Tuner(
+        data,
+        stage1_estimator=stage1,
+        cv_folds=2,
+        norm_constraint_factors=[0.5, 1.0, 1.5],
+        random_state=42,
+        silent=True,
+        l1_kwargs={
+            "n_grid_points": 80,
+            "learning_rate": 0.1,
+            "n_iterations": 20,
+            "ll_change_tol": 1e-3,
+            "history_every": 10,
+        },
+    )
+
+    train_idx, val_idx = tuner._fold_splits[0]
+    train_df = tuner.data.iloc[train_idx].reset_index(drop=True)
+    val_df = tuner.data.iloc[val_idx].reset_index(drop=True)
+    expected_len = 1 + max(tuner.basis_order, 0) + len(tuner.working_grid_points)
+    anchor_warm_start = np.linspace(0.0, 1.0, expected_len, dtype=float)
+
+    class DummyEstimator:
+        def __init__(self, theta_hat: np.ndarray):
+            self.theta_hat = theta_hat
+
+    calls: list[tuple[float, np.ndarray | None]] = []
+
+    def fake_fit_factor(
+        fit_df: pd.DataFrame,
+        factor: float,
+        *,
+        warm_start_theta: np.ndarray | None,
+    ):
+        calls.append((
+            float(factor),
+            None if warm_start_theta is None else np.asarray(warm_start_theta, dtype=float).copy(),
+        ))
+        theta = np.full(expected_len, float(factor), dtype=float)
+        results = {
+            "n_iterations_run": 5,
+            "converged": True,
+            "final_learning_rate": 0.1,
+            "recovery_count": 0,
+        }
+        return DummyEstimator(theta), results, 0.0
+
+    monkeypatch.setattr(tuner, "_fit_factor", fake_fit_factor)
+    monkeypatch.setattr(right_tuners_module, "incomplete_loglik", lambda *args, **kwargs: 0.0)
+
+    tuner.path_factors_ = [0.5, 1.0, 1.5]
+    tuner.path_anchor_factor_ = 1.0
+    path_df, estimators = tuner._evaluate_factor_path(
+        train_df,
+        warm_start_theta=anchor_warm_start,
+        score_df=val_df,
+        fold_idx=0,
+    )
+
+    assert list(path_df["norm_constraint_factor"]) == [1.0, 1.5, 0.5]
+    assert [factor for factor, _ in calls] == [1.0, 1.5, 0.5]
+    assert np.allclose(calls[0][1], anchor_warm_start)
+    assert np.allclose(calls[1][1], np.full(expected_len, 1.0))
+    assert np.allclose(calls[2][1], np.full(expected_len, 1.0))
+    assert sorted(estimators.keys()) == [0.5, 1.0, 1.5]
+
+
+def test_right_cv_observed_l1_estimator_produces_valid_density() -> None:
+    data = _make_right_censored_data(n=100, seed=11)
+    stage1 = _fit_stage1_right(data)
+
+    result = RightCensoredObservedL1Tuner(
+        data,
+        stage1_estimator=stage1,
+        cv_folds=2,
+        norm_constraint_factors=[1.0, 1.1, 1.2],
+        random_state=42,
+        silent=True,
+        l1_kwargs={
+            "n_grid_points": 80,
+            "learning_rate": 0.1,
+            "n_iterations": 120,
+            "ll_change_tol": 1e-3,
+            "history_every": 40,
+        },
+    ).optimize()
+
+    grid = np.linspace(0.001, 0.999, 400)
+    density = np.asarray(result.estimator.get_density_at_points(grid), dtype=float)
+    assert float(np.min(density)) >= -1e-12
+    area = float(trapezoid(density, grid))
+    assert 0.85 <= area <= 1.15
+
+
+def test_right_cv_observed_l1_conservative_selection_uses_smallest_legacy_percent_sd_factor() -> None:
+    data = _make_right_censored_data(n=100, seed=23)
+    stage1 = _fit_stage1_right(data)
+    tuner = RightCensoredObservedL1Tuner(
+        data,
+        stage1_estimator=stage1,
+        cv_folds=2,
+        norm_constraint_factors=[1.0, 1.1, 1.2],
+        random_state=42,
+        silent=True,
+        use_conservative_adjustment=True,
+        conservative_k_percent=0.05,
+        conservative_selection_rule="legacy_percent_sd",
+        l1_kwargs={
+            "n_grid_points": 80,
+            "learning_rate": 0.1,
+            "n_iterations": 20,
+            "ll_change_tol": 1e-3,
+            "history_every": 10,
+        },
+    )
+
+    path_df = pd.DataFrame(
+        {
+            "norm_constraint_factor": [1.0, 1.1, 1.2],
+            "norm_constraint": [10.0, 11.0, 12.0],
+            "mean_cv_loglik": [10.24, 10.29, 10.30],
+            "sd_cv_loglik": [0.10, 0.10, 0.30],
+            "n_valid_folds": [5, 5, 5],
+        }
+    )
+
+    selected_row, diagnostics = tuner._select_final_path_row(path_df)
+
+    assert float(selected_row["norm_constraint_factor"]) == pytest.approx(1.1)
+    assert diagnostics["selection_mode"] == "conservative_legacy_percent_sd"
+    assert diagnostics["conservative_threshold"] == pytest.approx(
+        10.30 - 0.05 * 0.30
+    )
+    assert diagnostics["conservative_row"]["norm_constraint_factor"] == pytest.approx(1.1)
+
+
+def test_cv_oversmooth_returns_valid_result_and_metadata() -> None:
+    data = _make_interval_censored_data()
+    stage1 = _fit_stage1_interval(data)
+
+    result = IntervalCensoredCVOversmoothEMTuner(
+        data,
+        stage1_estimator=stage1,
+        cv_folds=2,
+        oversmooth_factors=[0.5, 1.0],
+        em_norm_factors=[1.0, 2.0],
+        em_m_imputations=15,
+        em_max_em_iter=5,
+        em_tol=1e-2,
+        n_grid_points=100,
+        random_state=42,
+        silent=True,
+    ).optimize(n_trials=4)
+
+    assert result.metadata["mode"] == "cv_oversmooth"
+    assert set(result.best_params.keys()) == {"oversmooth_factor", "em_norm_factor"}
+    assert 0.5 <= result.best_params["oversmooth_factor"] <= 1.0
+    assert 1.0 <= result.best_params["em_norm_factor"] <= 2.0
+
+    # One record per Optuna trial
+    assert len(result.metadata["cv_records"]) == 4
+    assert result.metadata["n_trials"] == 4
+    for rec in result.metadata["cv_records"]:
+        assert len(rec.fold_scores) == 2  # cv_folds=2
+        assert isinstance(rec.mean_cv_ll, float)
+        assert isinstance(rec.sd_cv_ll, float)
+
+    assert result.metadata["best_record"] is not None
+    assert result.estimator is not None
+
+
+def test_cv_oversmooth_estimator_produces_valid_density() -> None:
+    data = _make_interval_censored_data()
+    stage1 = _fit_stage1_interval(data)
+
+    result = IntervalCensoredCVOversmoothEMTuner(
+        data,
+        stage1_estimator=stage1,
+        cv_folds=2,
+        oversmooth_factors=[0.5, 1.0],
+        em_norm_factors=[1.0, 2.0],
+        em_m_imputations=15,
+        em_max_em_iter=5,
+        em_tol=1e-2,
+        n_grid_points=100,
+        random_state=42,
+        silent=True,
+    ).optimize(n_trials=4)
+
+    grid = np.linspace(0.001, 0.999, 500)
+    density = np.asarray(result.estimator.get_density_at_points(grid), dtype=float)
+    assert float(np.min(density)) >= -1e-12
+    area = float(trapezoid(density, grid))
+    assert 0.85 <= area <= 1.15
