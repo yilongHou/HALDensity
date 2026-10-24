@@ -75,6 +75,20 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   Gaussian mixture, n = 400 and 1,280, k = 1 and 2): basis 1,121-1,257 -> 5-33 functions at
   n = 1,280; mean SE / Monte Carlo sd 1.11-2.76 -> 0.80-1.25; coverage of the truth 85-100%
   (median 100%) -> 83-99% (median 94%).
+- **The objective's normalizer is chosen by order** (`CVXPYEstimator(objective_normalizer="auto")`,
+  the new default; Yilong, 2026-10-24): the exact objective at k = 0, the midpoint rule with the
+  knots added to the grid at k = 1 (both through the step-height rewrite), the old midpoint rule (199
+  fixed cells) at k >= 2. **Default results change at k = 0 and 1**; k >= 2 is unchanged. In a CV
+  search over orders each trial uses its order's rule (the tuner needs no setting;
+  `trial.user_attrs["objective_rule"]` records it), and basis cleaning and the SE rebuild the same
+  problem. The rule is `haldensity.core.objective_rules.objective_rule(k, d)`, which returns an
+  identifier that each data-type package implements: d = 1 as above (`haldensity.full_uni`); d >= 2 the
+  multivariate estimator's existing rule (exact below the cell quota, the Sobol bank above, at k = 0;
+  the Sobol bank at k >= 1), now recorded in `MultvarHAL.get_results()["objective_rule"]`. Fits record
+  `objective_rule` and `objective_normalizer_used`; `objective_normalizer="midpoint"` gives the old
+  default. Evidence: `docs/dev/benchmarks/knot_aware_normalizer/` (the old midpoint rule spiked at
+  k = 0; the other two never did and were as accurate or better); at k = 2 the knots-added grid cost
+  107-415 s per 5-fold CV trial at n = 1,280 against 3.4-4.3 s, with about the same CV score.
 - **The old midpoint rule without the n x p data basis** (Yilong, 2026-10-24): the data term
   -sum_i f(x_i) is linear in theta, -s' theta with s the basis column sums, which are computed exactly
   from sorted data and prefix sums (O(n log n); `haldensity.core.univariate.objective.data_basis_sums`).

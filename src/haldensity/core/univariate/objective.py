@@ -55,7 +55,27 @@ from scipy.special import logsumexp
 
 from haldensity.core.basis.univariate import create_basis_functions
 
-OBJECTIVE_NORMALIZERS = ("midpoint", "knot_aware")
+OBJECTIVE_NORMALIZERS = ("midpoint", "knot_aware")      # what the objective implements
+OBJECTIVE_SETTINGS = ("auto",) + OBJECTIVE_NORMALIZERS    # what a user may ask for
+
+
+def resolve_objective_normalizer(setting: str, basis_order: int) -> tuple[str, str]:
+    """(implemented normalizer, rule identifier) for a univariate fit of order ``basis_order``.
+
+    ``"auto"`` follows :func:`haldensity.core.objective_rules.objective_rule` with d = 1: the exact
+    objective at k = 0 and the knots-added grid at k = 1 (both ``"knot_aware"``), the old midpoint rule
+    at k >= 2. An explicit ``"midpoint"`` or ``"knot_aware"`` is used as given.
+    """
+    from haldensity.core.objective_rules import EXACT, MIDPOINT, MIDPOINT_KNOTS_ADDED, objective_rule
+    if setting not in OBJECTIVE_SETTINGS:
+        raise ValueError(f"objective_normalizer must be one of {OBJECTIVE_SETTINGS}, got {setting!r}")
+    k = int(basis_order)
+    if setting == "auto":
+        rule = objective_rule(k, 1)
+        return ("midpoint" if rule == MIDPOINT else "knot_aware"), rule
+    if setting == "midpoint":
+        return "midpoint", MIDPOINT
+    return "knot_aware", EXACT if k == 0 else MIDPOINT_KNOTS_ADDED
 STRUCTURED_ORDERS = (0, 1)
 KNOT_CAP = 1000                  # default number of candidate knots (k >= 1; the floor for k = 0)
 

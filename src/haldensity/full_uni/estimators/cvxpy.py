@@ -13,12 +13,13 @@ from haldensity.core.solvers.cvxpy import (
 )
 from haldensity.core.univariate.base_estimator import BaseEstimator
 from haldensity.core.univariate.objective import (
-    OBJECTIVE_NORMALIZERS,
     STRUCTURED_ORDERS,
+    OBJECTIVE_SETTINGS,
     candidate_knots,
     dense_problem,
     normalizer_terms,
     resolve_max_knots,
+    resolve_objective_normalizer,
     structured_problem,
 )
 from haldensity.core.univariate.support import FullDataHALProblem, certified_solve
@@ -58,7 +59,7 @@ class CVXPYEstimator(BaseEstimator):
         use_secondary_solver: bool = True,
         solver_waterfall: list[str] = ["MOSEK", "CLARABEL", "ECOS", "SCS"],
         normalizer: str = "gauss_legendre",
-        objective_normalizer: str = "midpoint",
+        objective_normalizer: str = "auto",
         max_knots: Union[int, str, None] = "auto",
         solver_tolerance: str = "tight",
         solver_threads: int = DEFAULT_SOLVER_THREADS,
@@ -73,10 +74,13 @@ class CVXPYEstimator(BaseEstimator):
             solver: CVXPY solver to use (default: "MOSEK")
             normalizer: how the fitted density is normalized when evaluated (see BaseEstimator)
             objective_normalizer: the normalizer inside the fitting objective
-                (haldensity.core.univariate.objective). "midpoint" (default): midpoint rule on the
-                n_grid_points - 1 equal cells. "knot_aware": the candidate knots are breakpoints of
-                the cells, so no gap between knots is unseen; exact for basis_order = 0 (one term
-                per cell between consecutive knots, reusing the data term's values).
+                (haldensity.core.univariate.objective). "auto" (default; Yilong, 2026-10-24): by the
+                order (haldensity.core.objective_rules), the exact objective at basis_order = 0, the
+                midpoint rule with the knots added to the grid at 1 (both "knot_aware", through the
+                step-height rewrite), the old midpoint rule at >= 2. "midpoint": the old midpoint rule
+                on the n_grid_points - 1 equal cells (the default before 0.2.0). "knot_aware": the
+                candidate knots are breakpoints of the cells, so no gap between knots is unseen; exact
+                for basis_order = 0. objective_rule_ and get_results() record the rule used.
             max_knots: cap K on the number of candidate knots, placed at K data quantiles
                 (observations, de-duplicated). "auto" (default): K = 1,000 for basis_order >= 1 and
                 max(1,000, ceil(n^(2/3))) for basis_order = 0, so only samples above 1,000 are
@@ -97,8 +101,8 @@ class CVXPYEstimator(BaseEstimator):
         """
         if solver_tolerance not in SOLVER_TOLERANCES:
             raise ValueError(f"solver_tolerance must be one of {SOLVER_TOLERANCES}, got {solver_tolerance!r}")
-        if objective_normalizer not in OBJECTIVE_NORMALIZERS:
-            raise ValueError(f"objective_normalizer must be one of {OBJECTIVE_NORMALIZERS}, got {objective_normalizer!r}")
+        if objective_normalizer not in OBJECTIVE_SETTINGS:
+            raise ValueError(f"objective_normalizer must be one of {OBJECTIVE_SETTINGS}, got {objective_normalizer!r}")
         resolve_max_knots(max_knots, 1, basis_order)       # validates; the cap itself is set at fit time
         super().__init__(
             normalizer=normalizer,
@@ -121,6 +125,7 @@ class CVXPYEstimator(BaseEstimator):
         self.lambda_val_lag: Optional[float] = None
         self.knot_aware_formulation_used_: Optional[str] = None
         self.max_knots_used_: Optional[int] = None
+        self.objective_rule_: Optional[str] = None
         self.certified_: Optional[bool] = None
         self.kkt_: Optional[dict] = None
         self.solve_attempts_: tuple = ()
@@ -145,6 +150,7 @@ class CVXPYEstimator(BaseEstimator):
         observed = data['W1'].dropna().to_numpy(dtype=float)
         grid_points_hal = candidate_knots(observed, self.max_knots, basis_order=self.basis_order)
         self.max_knots_used_ = resolve_max_knots(self.max_knots, int(np.isfinite(observed).sum()), self.basis_order)
+        self.objective_rule_ = resolve_objective_normalizer(self.objective_normalizer, self.basis_order)[1]
         self._grid_points_hal = grid_points_hal  # Store the full set of candidate knots
         self._train_x = data['W1'].to_numpy(dtype=float)
         
@@ -197,10 +203,15 @@ class CVXPYEstimator(BaseEstimator):
 
         return self
     
+    @property
+    def _objective(self) -> str:
+        """The implemented objective normalizer for this order ("auto" resolved)."""
+        return resolve_objective_normalizer(self.objective_normalizer, self.basis_order)[0]
+
     def _default_solve(self, data: pd.DataFrame, grid_points_hal: np.ndarray):
         """solver_tolerance="default": the solvers' own tolerances, first acceptable status wins (v0.1.0)."""
         structured = (
-            self.objective_normalizer == "knot_aware"
+            self._objective == "knot_aware"
             and self.basis_order in STRUCTURED_ORDERS
             and self.knot_aware_formulation == "structured"
         )
@@ -231,7 +242,7 @@ class CVXPYEstimator(BaseEstimator):
             self.lambda_val_lag = None if dual is None else float(dual) * sparse.dual_scale
             theta_value = sparse.theta
         else:
-            self.knot_aware_formulation_used_ = "dense" if self.objective_normalizer == "knot_aware" else None
+            self.knot_aware_formulation_used_ = "dense" if self._objective == "knot_aware" else None
             problem, l1_constraint, theta_value = self._dense_problem(data, grid_points_hal)
             solve_result = solve_cvxpy_problem(problem=problem, **solve_options)
             self.objective_value_ = solve_result.objective_value
@@ -254,7 +265,7 @@ class CVXPYEstimator(BaseEstimator):
         self.basis_names = create_basis_functions(
             pd.DataFrame({'W1': [0.5]}), grid_points_hal, order=self.basis_order
         )[1]
-        self.knot_aware_formulation_used_ = fit.formulation if self.objective_normalizer == "knot_aware" else None
+        self.knot_aware_formulation_used_ = fit.formulation if self._objective == "knot_aware" else None
         self.objective_value_ = fit.objective_value
         self.lambda_val_lag = fit.dual_value
         self.solver_used_, self.solver_option_ = fit.solver_used, fit.option
@@ -278,7 +289,7 @@ class CVXPYEstimator(BaseEstimator):
             pd.DataFrame({'W1': [0.5]}), grid_points_hal, order=self.basis_order
         )[1]
         dense = dense_problem(self._train_x, grid_points_hal, self.basis_order, self.n_grid_points,
-                              self.objective_normalizer, self.norm_constraint)
+                              self._objective, self.norm_constraint)
         return dense.problem, dense.l1_constraint, dense.theta
 
     def objective_log_normalizer(self, theta: Optional[np.ndarray] = None) -> float:
@@ -291,7 +302,7 @@ class CVXPYEstimator(BaseEstimator):
             raise ValueError("Estimator must be fitted first")
         theta = np.asarray(self.optimized_theta_raw if theta is None else theta, dtype=float)
         terms = normalizer_terms(self._train_x, self._grid_points_hal, self.basis_order, self.n_grid_points,
-                                 self.objective_normalizer, build_basis=False)
+                                 self._objective, build_basis=False)
         from scipy.special import logsumexp
         return float(logsumexp(terms.log_widths + terms.log_density(theta, self._grid_points_hal, self.basis_order)))
 
@@ -306,6 +317,8 @@ class CVXPYEstimator(BaseEstimator):
             "norm_constraint": float(self.norm_constraint),
             "n_grid_points": int(self.n_grid_points),
             "objective_normalizer": self.objective_normalizer,
+            "objective_normalizer_used": self._objective,
+            "objective_rule": self.objective_rule_,
             "max_knots": self.max_knots,
             "max_knots_used": self.max_knots_used_,
             "n_candidate_knots": int(len(self._grid_points_hal)),

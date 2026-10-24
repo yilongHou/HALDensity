@@ -22,7 +22,8 @@ def data():
 @pytest.fixture(scope="module")
 def fit(data):
     # a loosely solved fit (v0.1.0 solver settings): the SE basis comes from a separate refit
-    return CVXPYEstimator(norm_constraint=20.0, basis_order=1, log_frequency=-1, solver_tolerance="default").fit(data)
+    return CVXPYEstimator(norm_constraint=20.0, basis_order=1, log_frequency=-1, solver_tolerance="default",
+                          objective_normalizer="midpoint").fit(data)
 
 
 @pytest.fixture(scope="module")
@@ -39,7 +40,7 @@ def test_refit_is_certified_and_no_larger_than_the_solver_basis(fit, refit):
 
 
 def test_kkt_report_flags_a_kept_coefficient_off_the_active_set(data, refit):
-    problem = FullDataHALProblem(data, basis_order=1)
+    problem = FullDataHALProblem(data, basis_order=1, objective_normalizer="midpoint")
     theta = refit.theta_raw.copy()
     inactive = 2 + int(np.flatnonzero(np.abs(theta[2:]) <= 1e-8)[0])
     theta[inactive] = 1e-3                     # residue above the 1e-4 pruning cutoff
@@ -93,7 +94,7 @@ def test_mismatched_inputs_are_rejected(data, fit, refit):
 
 
 def test_k0_refit_runs(data):
-    refit = refit_support(data, basis_order=0, norm_constraint=5.0)
+    refit = refit_support(data, basis_order=0, norm_constraint=5.0, objective_normalizer="midpoint")
     assert refit.basis_order == 0 and refit.theta.size == 1 + np.unique(data["W1"]).size
 
 

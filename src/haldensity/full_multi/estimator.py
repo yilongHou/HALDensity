@@ -10,6 +10,7 @@ import pandas as pd
 from scipy.special import logsumexp
 from scipy.stats import qmc
 
+from haldensity.core.objective_rules import EXACT, MIDPOINT, objective_rule
 from haldensity.core.solvers.cvxpy import solve_cvxpy_problem
 from haldensity.core.basis.multivariate import (
     coerce_multivariate_data,
@@ -238,6 +239,10 @@ class MultvarHAL:
         sobol_budget = self._resolve_sobol_budget(dimension)
 
         if self.normalizer == "auto":
+            # d >= 2: the package rule (haldensity.core.objective_rules); d = 1 keeps this class's own
+            # rule (haldensity.full_uni implements the d = 1 table, including the knots-added grid)
+            self.objective_rule_ = (objective_rule(self.k, dimension) if dimension >= 2
+                                    else (EXACT if self.k == 0 else MIDPOINT))
             if self.k == 0:
                 if dimension == 1:
                     return "exact", "auto: k=0 and d=1 uses exact cell normalizer"
@@ -264,6 +269,7 @@ class MultvarHAL:
                 f"auto: k>=1 and d>1 uses sobol budget {sobol_budget}",
             )
 
+        self.objective_rule_ = self.normalizer          # explicit: "exact", "midpoint" or "sobol"
         if self.normalizer == "exact" and self.k != 0:
             raise ValueError("normalizer='exact' is only available for k=0")
         if self.normalizer == "midpoint":
@@ -484,6 +490,7 @@ class MultvarHAL:
             "solver_status": self.problem_status_,
             "normalizer_requested": self.normalizer,
             "normalizer_method_used": self.normalizer_method_used_,
+            "objective_rule": getattr(self, "objective_rule_", None),
             "normalizer_size": self.normalizer_size_,
             "normalizer_auto_reason": self.normalizer_auto_reason_,
             "exact_candidate_budget": self.exact_candidate_budget_,
@@ -518,6 +525,7 @@ class MultvarHAL:
             "selected_basis_summary": self.selected_basis_summary_.copy(),
             "support": self.support,
             "normalizer_method": self.normalizer_method_used_,
+            "objective_rule": getattr(self, "objective_rule_", None),
             "normalizer_size": self.normalizer_size_,
             "normalizer_axes": None
             if self.normalizer_axes_ is None

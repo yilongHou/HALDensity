@@ -29,7 +29,7 @@ def test_tight_tolerances_reach_every_solver(monkeypatch, data):
 
     monkeypatch.setattr(cp.Problem, "solve", record)
     with pytest.raises(RuntimeError, match="No solver configuration"):
-        CVXPYEstimator(norm_constraint=10.0, basis_order=1, log_frequency=-1).fit(data)
+        CVXPYEstimator(norm_constraint=10.0, basis_order=1, log_frequency=-1, objective_normalizer="midpoint").fit(data)
     assert [c["solver"] for c in calls] == ["MOSEK", "CLARABEL", "CLARABEL", "ECOS", "ECOS", "SCS"]
     # the tolerances, plus the single-thread setting (haldensity.core.solvers.thread_options)
     assert calls[0]["mosek_params"] == {**MOSEK_TIGHT_PARAMS, "MSK_IPAR_NUM_THREADS": 1}
@@ -48,7 +48,8 @@ def test_tight_tolerances_reach_every_solver(monkeypatch, data):
     # solver_tolerance="default" passes no tolerance (v0.1.0), only the thread setting
     calls.clear()
     with pytest.raises(RuntimeError):
-        CVXPYEstimator(norm_constraint=10.0, basis_order=1, log_frequency=-1, solver_tolerance="default").fit(data)
+        CVXPYEstimator(norm_constraint=10.0, basis_order=1, log_frequency=-1, solver_tolerance="default",
+                       objective_normalizer="midpoint").fit(data)
     assert calls and all(set(c) == {"solver"} | set(thread_options(c["solver"])) for c in calls)
 
 
@@ -147,5 +148,5 @@ def test_failing_coordinates_are_counted_for_either_bound(data):
 def test_invalid_solver_tolerance(data):
     with pytest.raises(ValueError, match="solver_tolerance"):
         CVXPYEstimator(solver_tolerance="loose")
-    problem = FullDataHALProblem(data, 1)
-    assert problem.build(10.0).formulation == "dense"
+    assert FullDataHALProblem(data, 1, objective_normalizer="midpoint").build(10.0).formulation == "dense"
+    assert FullDataHALProblem(data, 1).build(10.0).formulation == "structured"     # "auto" at k = 1

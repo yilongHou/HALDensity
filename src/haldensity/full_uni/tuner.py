@@ -494,6 +494,7 @@ class OptunaHyperparameterTuner:
     def _fold_scores(self, params: dict[str, Any]) -> list[float]:
         """Finite validation scores of the folds that succeeded (failures are recorded)."""
         cv_scores = []
+        self._last_objective_rule = None
         
         for fold_idx, (train_idx, val_idx) in enumerate(self.kfold.split(self.data)):
             try:
@@ -510,6 +511,7 @@ class OptunaHyperparameterTuner:
                 with warnings.catch_warnings():
                     warnings.filterwarnings("ignore", message="Solution may be inaccurate", category=UserWarning)
                     estimator.fit(train_data)
+                self._last_objective_rule = getattr(estimator, "objective_rule_", None)
                 
                 # Compute metric on validation set using density-based approach
                 if self.metric == "sll":
@@ -552,6 +554,9 @@ class OptunaHyperparameterTuner:
         # Evaluate using cross-validation
         metric_value = self._evaluate_params_cv(params)
         self._trial_fold_scores[trial.number] = list(getattr(self, "_last_fold_scores", []))
+        if getattr(self, "_last_objective_rule", None) is not None:
+            # the objective the folds were fitted with ("auto" chooses it by the trial's order)
+            trial.set_user_attr("objective_rule", self._last_objective_rule)
         
         # Optuna minimizes, so negate SLL (which we want to maximize)
         if self.metric == "sll":

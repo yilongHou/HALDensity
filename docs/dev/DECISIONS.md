@@ -22,7 +22,7 @@ Status: reference list, 2026-10-24. Each item says what was decided, when, and w
 | --- | --- | --- |
 | Basis and knots | Truncated powers of order k, knots at the data points (at most K of them, see the knot cap); L1 constraint on all coefficients except the intercept | HALDensity's definition |
 | **Knot cap** `max_knots` | **Default `"auto"`: K = 1,000 for k ≥ 1; K = max(1,000, ⌈n^(2/3)⌉) for k = 0** (decided 2026-10-24), at K data quantiles; `None` = every data point. Changes default results only for n > 1,000 | Bounds memory and time at large n and keeps knots at least about 1/K apart. Rough rule for k = 0: a jump can only be placed to within about 1/K, costing about h²/K in squared L2, which must stay below n^(-2/3), so K ≳ n^(2/3) (acts only above n ≈ 31,600); k ≥ 1 needs far fewer knots (about n^(4/15) for k = 1). Benchmark: on a jump density at n = 20,000, K = 1,000 cost 5–13% in L2, K = 250 up to 43%, K = 100 up to 88%; nothing on smooth or kinked densities ([benchmarks/knot_aware_normalizer/](benchmarks/knot_aware_normalizer/README.md)) |
-| **Objective normalizer** | `"midpoint"`: the old midpoint rule (199 fixed cells; current default) or `"knot_aware"`: the exact objective for k = 0 and the midpoint rule with the knots added to the grid for k ≥ 1, solved through the step-height rewrite for k = 0 and 1. **Default per order: pending Yilong** (benchmark: the exact objective and the knots-added grid never spiked, were as accurate or better, and were faster than the old midpoint rule at large n) | The old midpoint rule is blind to mass between two close knots: the k = 0 spike (objective log Z 0.19 vs exact 18.4) |
+| **Objective normalizer** | **`"auto"` (default; decided 2026-10-24): chosen by order** — the exact objective at k = 0, the midpoint rule with the knots added to the grid at k = 1 (both through the step-height rewrite), the old midpoint rule (199 fixed cells) at k ≥ 2. Chosen per order inside one CV search. `haldensity.core.objective_rules.objective_rule(k, d)` returns the rule; each data-type package implements it (d ≥ 2: the multivariate estimator's rule, exact below the cell quota and the Sobol bank above at k = 0, the Sobol bank at k ≥ 1). Fits record the rule. `"midpoint"` = the old default | The old midpoint rule is blind to mass between two close knots: the k = 0 spike (objective log Z 0.19 vs exact 18.4). At k = 2 the knots-added grid cost 107–415 s per 5-fold CV trial at n = 1,280 against 3.4–4.3 s, with about the same CV score; Yilong: "we can tailor different rules for different k, and in future different d" |
 
 ## 3. Solvers and tolerances
 
@@ -80,7 +80,7 @@ Status: reference list, 2026-10-24. Each item says what was decided, when, and w
 
 ## 8. Pending decisions
 
-- Default objective per order (the exact objective at k = 0, the midpoint rule with the knots added to the grid at k = 1, the old midpoint rule at k ≥ 2, chosen per order inside one CV search), and extending the step-height rewrite to k ≥ 2.
+- Extending the step-height rewrite to k ≥ 2 (not needed for now: the old midpoint rule at k ≥ 2 has the lean data term).
 - Whether the paper's theory-checking runs use every knot (experiment side).
 - No SE when the final fit is uncertified (instead of using it with a warning).
 - Accurate normalizer for the censored-data estimators (RC project handoff).

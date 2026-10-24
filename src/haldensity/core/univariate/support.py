@@ -64,6 +64,7 @@ from haldensity.core.univariate.objective import (
     dense_problem,
     normalizer_terms,
     objective_gradient,
+    resolve_objective_normalizer,
     structured_problem,
 )
 
@@ -94,17 +95,19 @@ class FullDataHALProblem:
     """``CVXPYEstimator``'s optimization problem for one sample (same knots, cells and formulation)."""
 
     def __init__(self, data: pd.DataFrame, basis_order: int, n_grid_points: int = 200,
-                 objective_normalizer: str = "midpoint", max_knots: Union[int, str, None] = "auto",
+                 objective_normalizer: str = "auto", max_knots: Union[int, str, None] = "auto",
                  structured: bool = True):
         self.x = np.asarray(data["W1"].dropna(), dtype=float)
         self.basis_order = int(basis_order)
         self.n = int(self.x.size)
         self.n_grid_points = int(n_grid_points)
-        self.objective_normalizer = objective_normalizer
+        # the implemented normalizer and the rule identifier ("auto" resolves by the order)
+        self.objective_normalizer, self.objective_rule = resolve_objective_normalizer(objective_normalizer,
+                                                                                      self.basis_order)
         self.knots = candidate_knots(self.x, max_knots, basis_order=self.basis_order)
-        self.structured = (bool(structured) and objective_normalizer == "knot_aware"
+        self.structured = (bool(structured) and self.objective_normalizer == "knot_aware"
                            and self.basis_order in STRUCTURED_ORDERS)
-        self.terms = normalizer_terms(self.x, self.knots, self.basis_order, self.n_grid_points, objective_normalizer,
+        self.terms = normalizer_terms(self.x, self.knots, self.basis_order, self.n_grid_points, self.objective_normalizer,
                                       build_basis=False)
 
     def build(self, norm_constraint: float, dense: bool = False) -> BuiltProblem:
@@ -280,7 +283,7 @@ def refit_support(
     norm_constraint: float,
     *,
     n_grid_points: int = 200,
-    objective_normalizer: str = "midpoint",
+    objective_normalizer: str = "auto",
     max_knots: Union[int, str, None] = "auto",
     ladder: tuple[tuple[str, str, dict[str, Any]], ...] = LADDER,
     prune: float = PRUNE,

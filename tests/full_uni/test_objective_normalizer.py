@@ -32,7 +32,7 @@ def test_default_matches_the_pre_option_problem(data):
         problem = cp.Problem(cp.Minimize(loss), [cp.norm1(theta[1:]) <= 5.0])
         solve_cvxpy_problem(problem=problem, primary_solver="ECOS", use_secondary_solver=False)
         fit = CVXPYEstimator(norm_constraint=5.0, basis_order=k, max_knots=None, solver_tolerance="default",
-                             **ECOS).fit(data)
+                             objective_normalizer="midpoint", **ECOS).fit(data)
         # theta[0] is not identified (a constant added to f cancels between the data term and n log Z)
         np.testing.assert_allclose(fit.optimized_theta_raw[1:], theta.value[1:], rtol=0, atol=1e-5)
         assert fit.objective_value_ == pytest.approx(problem.value, rel=1e-7)
