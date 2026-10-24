@@ -9,12 +9,11 @@ from haldensity.rc.observed_mle import (
     right_censored_observed_loglik_and_gradient,
 )
 from haldensity.rc.weights import compute_ipcw_weights
-from haldensity.rc.comparison import simulate_beta_uniform_right_censored
+from haldensity.datasets import make_right_censored
 
 
 def _make_data(n: int = 64, seed: int = 13) -> pd.DataFrame:
-    sim = simulate_beta_uniform_right_censored(n=n, seed=seed)
-    return sim["observed_data"]
+    return make_right_censored(n, seed=seed)
 
 
 def _fit_stage1_like_estimator(

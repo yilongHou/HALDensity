@@ -9,8 +9,9 @@ from haldensity.datasets.censoring import (
     interval_censor,
     interval_censor_current_status_uniform,
     interval_censor_inspection_uniform,
-    interval_censor_width_uniform,
+    make_right_censored,
 )
+from haldensity.datasets.galaxies import load_galaxies
 
 __all__ = [
     "TruncatedNormal",
@@ -21,5 +22,6 @@ __all__ = [
     "interval_censor",
     "interval_censor_current_status_uniform",
     "interval_censor_inspection_uniform",
-    "interval_censor_width_uniform",
+    "make_right_censored",
+    "load_galaxies",
 ]

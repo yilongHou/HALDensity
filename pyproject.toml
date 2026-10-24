@@ -55,7 +55,7 @@ package-dir = {"" = "src"}
 include-package-data = true
 
 [tool.setuptools.package-data]
-"haldensity" = ["py.typed"]
+"haldensity" = ["py.typed", "datasets/data/*.csv"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

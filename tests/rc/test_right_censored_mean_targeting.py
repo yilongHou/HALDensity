@@ -11,16 +11,12 @@ from haldensity.rc.targeting.mean import (
 )
 from haldensity.rc.targeting.mean import _compute_mean_direction_on_grid
 from haldensity.rc.targeting._common import RCCensoringCache, RCTargetGrid
+from haldensity.datasets import make_right_censored
 
 
 def _make_observed_data(n: int = 64, seed: int = 101) -> pd.DataFrame:
-    rng = np.random.default_rng(seed)
-    event = np.clip(rng.beta(2.2, 2.5, size=n), 1e-3, 0.999)
-    censor = rng.uniform(0.0, 1.2, size=n)
-    observed = np.minimum(event, censor)
-    delta = (event <= censor).astype(int)
-    data = pd.DataFrame({"T": observed, "Delta": delta})
-    assert int(delta.sum()) > 8
+    data = make_right_censored(n, seed=seed, event_clip=(1e-3, 0.999))
+    assert int(data["Delta"].sum()) > 8
     return data
 
 

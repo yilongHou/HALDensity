@@ -14,12 +14,12 @@ from haldensity.rc.fit import RightCensoredHALFit
 from haldensity.rc.estimators import RightCensoredInitEstimator
 from haldensity.rc.observed_mle import RightCensoredObservedL1MLE
 from haldensity.rc.weights import compute_ipcw_weights
-from haldensity.rc.comparison import simulate_beta_uniform_right_censored
+from haldensity.datasets import make_right_censored
 from haldensity.rc.tuners import RightCensoredObservedL1Tuner
 
 
 def _make_data(n: int = 80, seed: int = 11) -> pd.DataFrame:
-    return simulate_beta_uniform_right_censored(n=n, seed=seed)["observed_data"]
+    return make_right_censored(n, seed=seed)
 
 
 def _fit_ipcw(data: pd.DataFrame, *, n_grid_points: int = 80) -> RightCensoredInitEstimator:

@@ -1,7 +1,11 @@
-"""Simulation helpers for interval-censored data.
+"""Simple simulators for censored data, for tests and tutorials.
 
-These are intentionally lightweight utilities for generating (L, R) intervals
-from latent event times T under common non-informative inspection schemes.
+Right-censored data: :func:`make_right_censored` draws event and censoring
+times and returns the observed ``(T, Delta)``.
+
+Interval-censored data: lightweight utilities that turn latent event times T
+into ``(L, R)`` intervals under non-informative inspection schemes (current
+status is the one-inspection case).
 """
 
 from __future__ import annotations
@@ -12,7 +16,7 @@ import numpy as np
 import pandas as pd
 
 
-IntervalMechanism = Literal["inspection_uniform", "current_status_uniform", "width_uniform"]
+IntervalMechanism = Literal["inspection_uniform", "current_status_uniform"]
 
 
 def _as_rng(random_state: int | None, rng: np.random.Generator | None) -> np.random.Generator:
@@ -94,52 +98,6 @@ def interval_censor_current_status_uniform(
     return pd.DataFrame({"L": L, "R": R})
 
 
-def interval_censor_width_uniform(
-    event_times: np.ndarray,
-    *,
-    width_low: float = 0.05,
-    width_high: float = 0.15,
-    min_width: float = 0.01,
-    t_min: float = 0.0,
-    t_max: float = 1.0,
-    random_state: int | None = None,
-    rng: np.random.Generator | None = None,
-) -> pd.DataFrame:
-    """Legacy mechanism: construct an interval around T (informative).
-
-    This is retained for backward compatibility with older examples/tests where
-    [L, R] was created directly from the latent event time.
-    """
-    if min_width <= 0:
-        raise ValueError("min_width must be positive")
-    if width_low <= 0 or width_high <= 0 or width_high < width_low:
-        raise ValueError("require 0 < width_low <= width_high")
-    if not (t_min < t_max):
-        raise ValueError("require t_min < t_max")
-
-    T = np.asarray(event_times, dtype=float)
-    n = int(T.shape[0])
-    g = _as_rng(random_state, rng)
-
-    widths = g.uniform(width_low, width_high, size=n)
-    widths = np.maximum(widths, min_width)
-    left_shifts = g.uniform(0.0, 1.0, size=n) * widths
-
-    L = np.clip(T - left_shifts, t_min, t_max)
-    R = np.clip(L + widths, t_min, t_max)
-
-    R = np.maximum(R, T)
-    R = np.minimum(t_max, np.maximum(R, L + min_width))
-
-    invalid = R <= L
-    if np.any(invalid):
-        L[invalid] = np.minimum(L[invalid], t_max - min_width)
-        L[invalid] = np.maximum(L[invalid], t_min)
-        R[invalid] = np.minimum(t_max, L[invalid] + min_width)
-        R[invalid] = np.maximum(R[invalid], T[invalid])
-
-    return pd.DataFrame({"L": L, "R": R})
-
 
 def interval_censor(
     event_times: np.ndarray,
@@ -152,7 +110,37 @@ def interval_censor(
         return interval_censor_inspection_uniform(event_times, **kwargs)
     if mechanism == "current_status_uniform":
         return interval_censor_current_status_uniform(event_times, **kwargs)
-    if mechanism == "width_uniform":
-        return interval_censor_width_uniform(event_times, **kwargs)
     raise ValueError(f"Unsupported interval censoring mechanism: {mechanism}")
 
+
+def make_right_censored(
+    n: int,
+    *,
+    seed: int = 0,
+    event_beta_shape: tuple[float, float] = (2.2, 2.5),
+    censor_low: float = 0.0,
+    censor_high: float = 1.2,
+    event_clip: tuple[float, float] | None = None,
+) -> pd.DataFrame:
+    """Simulate right-censored data with Beta event times and uniform censoring.
+
+    Event times are Beta(a, b) on ``[0, 1]`` and censoring times are
+    Unif[censor_low, censor_high]. The default Unif[0, 1.2] keeps the censoring
+    survival positive on ``[0, 1]``. ``event_clip=(lo, hi)`` clips the event
+    times before censoring (the package tests use ``(1e-3, 0.999)``).
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns ``T`` (observed time, min of event and censoring) and ``Delta``
+        (1 if the event is observed).
+    """
+    rng = np.random.default_rng(seed)
+    a, b = event_beta_shape
+    event_times = rng.beta(a, b, size=int(n))
+    if event_clip is not None:
+        event_times = np.clip(event_times, event_clip[0], event_clip[1])
+    censor_times = rng.uniform(float(censor_low), float(censor_high), size=int(n))
+    observed = np.minimum(event_times, censor_times)
+    delta = (event_times <= censor_times).astype(int)
+    return pd.DataFrame({"T": observed, "Delta": delta})
