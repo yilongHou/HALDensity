@@ -51,6 +51,12 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
 
 ### Changed (behaviour)
 
+- Full-data CV scores each fold by evaluating the fitted log density exactly at the validation
+  points (with the accurate normalizer) instead of linearly interpolating `get_density()` on its
+  200-point grid. In 16 simulated datasets (4 densities, n = 400 and 1,280, k = 1) the selected
+  bound was unchanged in 11; in the 4 n = 1,280 cases where the old score picked a much larger M,
+  held-out log-likelihood rose by 0.019-0.030 nats and L2 error fell by 0.33-0.56. Old
+  behaviour: `cv_scoring="interpolated"` with `estimator_kwargs={"normalizer": "midpoint"}`.
 - Full-data estimators evaluate and report the density with an accurate normalizer: log Z by
   cell-wise Gauss-Legendre with breakpoints at the knots with nonzero coefficients (32 nodes per
   cell, doubled until the change is below 1e-12; exact for k = 0), in float64. The midpoint rule

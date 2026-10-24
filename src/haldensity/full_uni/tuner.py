@@ -37,6 +37,8 @@ from haldensity.full_uni.estimators.proximal_newton_lbfgs_full import (
     ProximalNewtonLBFGSFullEstimator,
 )
 
+CV_SCORINGS = ("exact", "interpolated")
+
 # Available estimators for tuning (supported set only)
 ESTIMATORS = {
     "CVXPYEstimator": CVXPYEstimator,
@@ -72,6 +74,7 @@ class OptunaHyperparameterTuner:
         show_progress: bool = False,
         param_overrides: Optional[dict[str, Any]] = None,
         estimator_kwargs: Optional[dict[str, Any]] = None,
+        cv_scoring: str = "exact",
     ):
         """
         Initialize the hyperparameter tuner.
@@ -97,6 +100,13 @@ class OptunaHyperparameterTuner:
                 (primary solver plus fallback waterfall). For the old ECOS-only behaviour pass
                 {"solver": "ECOS", "use_secondary_solver": False}. Keys must not overlap the
                 tuned parameters; fix those with param_overrides instead.
+            cv_scoring: How a fitted fold estimator is scored on its validation points.
+                "exact" (default): the fitted log density evaluated exactly at each point
+                (estimator.get_log_density_at_points, normalized per the estimator's
+                `normalizer`, by default the accurate Gauss-Legendre log Z).
+                "interpolated": the pre-0.2.0 score, linear interpolation of get_density()
+                on its 200-point grid with a 1e-10 floor. Fully old behaviour also needs
+                estimator_kwargs={"normalizer": "midpoint"}.
         """
         if estimator_name not in ESTIMATORS:
             raise ValueError(f"Estimator '{estimator_name}' not supported. "
@@ -104,6 +114,8 @@ class OptunaHyperparameterTuner:
         
         if metric not in ["sll", "bic"]:
             raise ValueError(f"Metric '{metric}' not supported. Use 'sll' or 'bic'.")
+        if cv_scoring not in CV_SCORINGS:
+            raise ValueError(f"cv_scoring must be one of {CV_SCORINGS}, got {cv_scoring!r}")
         
         self.estimator_name = estimator_name
         self.estimator_class = ESTIMATORS[estimator_name]
@@ -119,6 +131,7 @@ class OptunaHyperparameterTuner:
         self.show_progress = show_progress
         self.param_overrides: dict[str, Any] = param_overrides or {}
         self.estimator_kwargs: dict[str, Any] = dict(estimator_kwargs or {})
+        self.cv_scoring = cv_scoring
 
         # Cross-validation setup
         self.kfold = KFold(n_splits=cv_folds, shuffle=True, random_state=random_state)
@@ -215,15 +228,24 @@ class OptunaHyperparameterTuner:
     
     def _compute_log_likelihood_from_density(self, estimator: Any, validation_points: np.ndarray) -> float:
         """
-        Compute average log-likelihood using the density output from any estimator.
-        
+        Average validation log-likelihood of a fitted estimator (see ``cv_scoring``).
+
         Args:
             estimator: Fitted estimator
             validation_points: Points to evaluate log-likelihood on
-            
+
         Returns:
             Average log-likelihood
         """
+        if self.cv_scoring == "exact":
+            try:
+                log_density = np.asarray(estimator.get_log_density_at_points(validation_points), dtype=float)
+                return float(np.mean(log_density))
+            except Exception as e:
+                if not self.silent:
+                    print(f"Warning: Failed to compute log-likelihood: {e}")
+                return -np.inf
+
         try:
             # Get density from the estimator
             grid_points, density_values = estimator.get_density()
@@ -624,6 +646,7 @@ class OptunaHyperparameterTuner:
             "optimization_config": {
                 "cv_folds": self.cv_folds,
                 "metric": self.metric,
+                "cv_scoring": self.cv_scoring,
                 "n_trials": len(self.study.trials),
                 "random_state": self.random_state
             },
