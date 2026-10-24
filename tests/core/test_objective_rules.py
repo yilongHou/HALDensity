@@ -84,7 +84,7 @@ def test_basis_cleaning_and_the_se_rebuild_the_same_problem():
     np.testing.assert_allclose(refit.theta[1:], tight.theta_hat[1:], atol=1e-6)
     assert FullDataHALProblem(data, 0).objective_rule == EXACT          # the problem cleaning rebuilds
     # a loosely solved fit's SE refit resolves "auto" the same way as an explicit exact objective
-    loose = CVXPYEstimator(norm_constraint=8.0, basis_order=0, log_frequency=-1, solver_tolerance="default").fit(data)
+    loose = CVXPYEstimator(norm_constraint=8.0, basis_order=0, log_frequency=-1, _solver_tolerance="default").fit(data)
     cleaned = _auto_refit(data, loose.get_results(), 0)
     explicit = refit_support(data, 0, 8.0, objective_normalizer="knot_aware")
     np.testing.assert_array_equal(cleaned.theta, explicit.theta)

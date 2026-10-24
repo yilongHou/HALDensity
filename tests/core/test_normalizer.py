@@ -48,8 +48,8 @@ def test_gauss_legendre_matches_adaptive_quadrature(k):
 
 def test_estimator_density_integrates_to_one_and_midpoint_option_keeps_old_values():
     data = pd.DataFrame({"W1": np.random.default_rng(0).beta(2.0, 5.0, size=200)})
-    fit = CVXPYEstimator(norm_constraint=50.0, basis_order=1, log_frequency=-1, solver="ECOS",
-                         use_secondary_solver=False).fit(data)
+    fit = CVXPYEstimator(norm_constraint=50.0, basis_order=1, log_frequency=-1, _solver="ECOS",
+                         _use_secondary_solver=False).fit(data)
     assert fit.normalizer == "gauss_legendre"
     theta, knots = np.asarray(fit.theta_hat, float), np.asarray(fit._grid_points_hal, float)
     active = knots[theta[2:] != 0]
@@ -68,4 +68,4 @@ def test_estimator_density_integrates_to_one_and_midpoint_option_keeps_old_value
 
 def test_unknown_normalizer_is_rejected():
     with pytest.raises(ValueError, match="normalizer must be one of"):
-        CVXPYEstimator(normalizer="trapezoid")
+        CVXPYEstimator(_normalizer="trapezoid")

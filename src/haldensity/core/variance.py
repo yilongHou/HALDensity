@@ -2,7 +2,7 @@
 
 Basis cleaning (on by default): the SE is computed on the basis of an accurate, certified solution
 (:mod:`haldensity.core.univariate.support`) instead of a loosely solved fit's pruned basis.
-``support_refit="auto"`` (default): a ``CVXPYEstimator`` fit with ``solver_tolerance="tight"``
+``support_refit="auto"`` (default): a ``CVXPYEstimator`` fit (its tight final solve, the default)
 (its default) already is that solution, and its own basis is used, so the point estimate and the
 SE share one solve; for other results that carry the fit's L1 bound (e.g. ``solver_tolerance=
 "default"``) the problem is re-solved tightly once per fit, cached and reused in
@@ -20,6 +20,7 @@ from scipy.stats import norm
 import warnings
 
 from haldensity.core.basis.univariate import create_basis_functions
+from haldensity.core.options import take_deprecated
 from haldensity.core.univariate.support import SupportRefit, refit_support
 
 SupportRefitArg = Union[SupportRefit, None, str]
@@ -57,7 +58,7 @@ def _refit_key(estimation_results: dict, basis_order: int) -> Optional[tuple]:
 def _auto_refit(data: pd.DataFrame, estimation_results: dict, basis_order: int) -> Optional[SupportRefit]:
     """The cleaned basis of this fit, or None if the fit has no L1 bound.
 
-    A fit made with ``solver_tolerance="tight"`` carries its certified solution (``support_refit``),
+    A fit made with the tight final solve (the default) carries its certified solution (``support_refit``),
     which is used as it is; otherwise the problem is re-solved tightly once and cached.
     """
     carried = estimation_results.get('support_refit')
@@ -110,8 +111,10 @@ def estimate_covariance_beta(
     data: pd.DataFrame,
     estimation_results: dict,
     basis_order: int,
-    ridge_param: float = 1e-6,
+    *,
     support_refit: SupportRefitArg = "auto",
+    _ridge_param: float = 1e-6,
+    **deprecated,
 ) -> np.ndarray:
     """Estimate Cov(β̂) via observed Fisher information with ridge regularization.
 
@@ -119,6 +122,9 @@ def estimate_covariance_beta(
     L1 bound; ``None`` uses the original basis; a :class:`SupportRefit` is used as given. If basis
     cleaning failed, no SE is given: the covariance is NaN, with a warning.
     """
+    # ridge_param (0.1.0) is internal since 0.2.0; accepted through 0.2.x with a DeprecationWarning
+    ridge_param = take_deprecated("estimate_covariance_beta", deprecated, {"ridge_param": "_ridge_param"}).get(
+        "_ridge_param", _ridge_param)
     if isinstance(support_refit, str):
         if support_refit != "auto":
             raise ValueError("support_refit must be 'auto', None or a SupportRefit")

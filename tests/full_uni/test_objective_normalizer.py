@@ -11,9 +11,7 @@ from haldensity.core.univariate.objective import candidate_knots
 from haldensity.core.univariate.support import refit_support_from_estimator
 from haldensity.full_uni import CVXPYEstimator
 
-ECOS = dict(solver="ECOS", use_secondary_solver=False, log_frequency=-1)
-
-
+ECOS = dict(_solver="ECOS", _use_secondary_solver=False, log_frequency=-1)
 @pytest.fixture(scope="module")
 def data():
     return pd.DataFrame({"W1": np.random.default_rng(0).beta(2.0, 5.0, size=300)})
@@ -32,7 +30,7 @@ def test_default_matches_the_pre_option_problem(data):
         loss = -cp.sum(b_ik @ theta) + len(data) * cp.log_sum_exp(np.log(grid[1:] - grid[:-1]) + b_jk @ theta)
         problem = cp.Problem(cp.Minimize(loss), [cp.norm1(theta[1:]) <= 5.0])
         solve_cvxpy_problem(problem=problem, primary_solver="ECOS", use_secondary_solver=False)
-        fit = CVXPYEstimator(norm_constraint=5.0, basis_order=k, max_knots=None, solver_tolerance="default",
+        fit = CVXPYEstimator(norm_constraint=5.0, basis_order=k, max_knots=None, _solver_tolerance="default",
                              _objective_normalizer="midpoint", **ECOS).fit(data)
         # theta[0] is not identified (a constant added to f cancels between the data term and n log Z)
         np.testing.assert_allclose(fit.optimized_theta_raw[1:], theta.value[1:], rtol=0, atol=1e-5)

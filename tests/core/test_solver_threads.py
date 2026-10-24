@@ -48,7 +48,7 @@ def _record(monkeypatch):
 def test_the_thread_limit_reaches_every_solver(monkeypatch, data, tolerance):
     calls = _record(monkeypatch)
     with pytest.raises(RuntimeError):
-        CVXPYEstimator(norm_constraint=10.0, basis_order=1, log_frequency=-1, solver_tolerance=tolerance).fit(data)
+        CVXPYEstimator(norm_constraint=10.0, basis_order=1, log_frequency=-1, _solver_tolerance=tolerance).fit(data)
     by_solver = {c["solver"]: c for c in calls}
     assert set(by_solver) == {"MOSEK", "CLARABEL", "ECOS", "SCS"}
     assert by_solver["MOSEK"]["mosek_params"]["MSK_IPAR_NUM_THREADS"] == 1
@@ -58,7 +58,7 @@ def test_the_thread_limit_reaches_every_solver(monkeypatch, data, tolerance):
 
     calls.clear()
     with pytest.raises(RuntimeError):
-        CVXPYEstimator(norm_constraint=10.0, basis_order=1, log_frequency=-1, solver_tolerance=tolerance,
+        CVXPYEstimator(norm_constraint=10.0, basis_order=1, log_frequency=-1, _solver_tolerance=tolerance,
                        solver_threads=4).fit(data)
     assert {c["solver"]: c for c in calls}["MOSEK"]["mosek_params"]["MSK_IPAR_NUM_THREADS"] == 4
 

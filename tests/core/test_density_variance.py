@@ -8,7 +8,7 @@ from haldensity.full_uni.estimators.cvxpy import CVXPYEstimator
 def test_delta_method_confidence_interval_runs_end_to_end():
     data = pd.DataFrame({"W1": np.random.default_rng(0).beta(2.0, 5.0, size=200)})
     estimator = CVXPYEstimator(
-        norm_constraint=5.0, basis_order=1, log_frequency=-1, solver="ECOS", use_secondary_solver=False
+        norm_constraint=5.0, basis_order=1, log_frequency=-1, _solver="ECOS", _use_secondary_solver=False
     ).fit(data)
     results = estimator.get_results()
 

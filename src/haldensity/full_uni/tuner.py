@@ -28,6 +28,7 @@ from sklearn.model_selection import KFold
 
 from haldensity.core.cv.conservative import SELECTION_RULES, bisection_search, conservative_threshold
 from haldensity.core.defaults import DEFAULT_BASIS_ORDER, TUNER_DEFAULTS
+from haldensity.core.options import take_deprecated
 
 # Import estimators
 from haldensity.full_uni.estimators.cvxpy import CVXPYEstimator
@@ -67,30 +68,37 @@ class OptunaHyperparameterTuner:
         self,
         estimator_name: str,
         data: pd.DataFrame,
+        *,
         cv_folds: int = TUNER_DEFAULTS.cv_folds,
         metric: str = "sll",
         random_state: int = 42,
         max_iter: int = 50_000,
         tolerance: float = 1e-6,
         log_frequency: int = -1,  # No logging during CV
-        n_grid_points: int = 200,
         silent: bool = True,
         show_progress: bool = False,
         param_overrides: Optional[dict[str, Any]] = None,
         estimator_kwargs: Optional[dict[str, Any]] = None,
-        cv_scoring: str = "exact",
-        cv_solver_tolerance: str = "default",
         use_conservative_adjustment: Union[bool, str] = False,
         conservative_selection_rule: str = TUNER_DEFAULTS.conservative_selection_rule,
         conservative_k_percent: float = TUNER_DEFAULTS.conservative_k_percent,
         conservative_se_multiplier: float = TUNER_DEFAULTS.conservative_se_multiplier,
-        conservative_bracket_factor: float = TUNER_DEFAULTS.conservative_bracket_factor,
-        conservative_min_norm_constraint: float = TUNER_DEFAULTS.conservative_min_norm_constraint,
-        conservative_step_pct: float = TUNER_DEFAULTS.conservative_step_pct,
-        conservative_max_steps: int = TUNER_DEFAULTS.conservative_max_steps,
+        # internal (leading underscore): numerical choices the package makes (docs/dev/DECISIONS.md)
+        _cv_scoring: str = "exact",
+        _cv_solver_tolerance: str = "default",
+        _conservative_bracket_factor: float = TUNER_DEFAULTS.conservative_bracket_factor,
+        _conservative_min_norm_constraint: float = TUNER_DEFAULTS.conservative_min_norm_constraint,
+        _conservative_step_pct: float = TUNER_DEFAULTS.conservative_step_pct,
+        _conservative_max_steps: int = TUNER_DEFAULTS.conservative_max_steps,
+        **deprecated,
     ):
         """
         Initialize the hyperparameter tuner.
+
+        CV folds are scored by the exact held-out log-likelihood and fitted at the solvers' own
+        tolerances; the final fit (fit_best_model) is the estimator's tight, checked solve. The
+        0.1.0 option n_grid_points had no effect; it is still accepted through 0.2.x with a
+        DeprecationWarning (removed in 0.3.0).
         
         Args:
             estimator_name: Name of the estimator to tune
@@ -102,7 +110,6 @@ class OptunaHyperparameterTuner:
             max_iter: Maximum iterations for iterative estimators
             tolerance: Convergence tolerance
             log_frequency: Logging frequency (-1 = no logging)
-            n_grid_points: Number of grid points for density evaluation
             silent: Whether to suppress all print statements
             param_overrides: Optional overrides/limits for hyperparameters. basis_order is fixed at
                 DEFAULT_BASIS_ORDER = 2 unless given here; {"basis_order": [0, 1, 2]} cross-validates
@@ -112,22 +119,8 @@ class OptunaHyperparameterTuner:
                   or a tuple/list (low, high), or a single fixed value
             estimator_kwargs: Optional fixed (not tuned) keyword arguments passed to every
                 estimator the tuner builds, in the CV folds and in fit_best_model(), so both
-                use the same settings. By default CVXPYEstimator uses its own solver defaults
-                (primary solver plus fallback waterfall). For the old ECOS-only behaviour pass
-                {"solver": "ECOS", "use_secondary_solver": False}. Keys must not overlap the
-                tuned parameters; fix those with param_overrides instead.
-            cv_scoring: How a fitted fold estimator is scored on its validation points.
-                "exact" (default): the fitted log density evaluated exactly at each point
-                (estimator.get_log_density_at_points, normalized per the estimator's
-                `normalizer`, by default the accurate Gauss-Legendre log Z).
-                "interpolated": the pre-0.2.0 score, linear interpolation of get_density()
-                on its 200-point grid with a 1e-10 floor. Fully old behaviour also needs
-                estimator_kwargs={"normalizer": "midpoint"}.
-            cv_solver_tolerance: `solver_tolerance` of the CVXPYEstimator fits in the CV folds (the
-                search and the conservative adjustment). "default" (default): the solvers' own
-                tolerances; the final fit in fit_best_model() uses the estimator's setting (its
-                default "tight": MOSEK 1e-12 and a certified solution). "tight" makes the folds tight
-                too. A `solver_tolerance` in estimator_kwargs applies to the final fit only.
+                use the same settings, e.g. {"max_knots": None} or {"solver_threads": 4}. Keys must
+                not overlap the tuned parameters; fix those with param_overrides instead.
             use_conservative_adjustment: After the CV search, move to the smallest bound
                 (norm_constraint) whose mean CV log-likelihood is at least the threshold below the
                 best (haldensity.core.cv.conservative; bracketing then bisection in log M), as the
@@ -144,9 +137,6 @@ class OptunaHyperparameterTuner:
             conservative_selection_rule, conservative_k_percent, conservative_se_multiplier:
                 threshold = best - k_percent * SD ("legacy_percent_sd", default) or
                 best - se_multiplier * SD / sqrt(folds) ("one_se").
-            conservative_bracket_factor, conservative_min_norm_constraint, conservative_step_pct,
-            conservative_max_steps: search settings (shrink factor, floor, relative tolerance,
-                maximum CV evaluations).
         """
         if estimator_name not in ESTIMATORS:
             raise ValueError(f"Estimator '{estimator_name}' not supported. "
@@ -154,8 +144,9 @@ class OptunaHyperparameterTuner:
         
         if metric not in ["sll", "bic"]:
             raise ValueError(f"Metric '{metric}' not supported. Use 'sll' or 'bic'.")
-        if cv_scoring not in CV_SCORINGS:
-            raise ValueError(f"cv_scoring must be one of {CV_SCORINGS}, got {cv_scoring!r}")
+        take_deprecated("OptunaHyperparameterTuner", deprecated, {"n_grid_points": None})
+        if _cv_scoring not in CV_SCORINGS:
+            raise ValueError(f"_cv_scoring must be one of {CV_SCORINGS}, got {_cv_scoring!r}")
         
         self.estimator_name = estimator_name
         self.estimator_class = ESTIMATORS[estimator_name]
@@ -166,7 +157,6 @@ class OptunaHyperparameterTuner:
         self.max_iter = max_iter
         self.tolerance = tolerance
         self.log_frequency = log_frequency
-        self.n_grid_points = n_grid_points
         self.silent = silent
         self.show_progress = show_progress
         self.param_overrides: dict[str, Any] = dict(param_overrides or {})
@@ -174,10 +164,10 @@ class OptunaHyperparameterTuner:
         # e.g. param_overrides={"basis_order": [0, 1, 2]} (Yilong, 2026-10-24)
         self.param_overrides.setdefault("basis_order", DEFAULT_BASIS_ORDER)
         self.estimator_kwargs: dict[str, Any] = dict(estimator_kwargs or {})
-        self.cv_scoring = cv_scoring
-        if cv_solver_tolerance not in ("tight", "default"):
-            raise ValueError(f"cv_solver_tolerance must be 'tight' or 'default', got {cv_solver_tolerance!r}")
-        self.cv_solver_tolerance = cv_solver_tolerance
+        self.cv_scoring = _cv_scoring
+        if _cv_solver_tolerance not in ("tight", "default"):
+            raise ValueError(f"_cv_solver_tolerance must be 'tight' or 'default', got {_cv_solver_tolerance!r}")
+        self.cv_solver_tolerance = _cv_solver_tolerance
         if not (isinstance(use_conservative_adjustment, bool) or use_conservative_adjustment == "auto"):
             raise ValueError("use_conservative_adjustment must be True, False or 'auto'")
         self.use_conservative_adjustment = use_conservative_adjustment
@@ -186,12 +176,12 @@ class OptunaHyperparameterTuner:
             raise ValueError(f"conservative_selection_rule must be one of {SELECTION_RULES}")
         self.conservative_k_percent = float(conservative_k_percent)
         self.conservative_se_multiplier = float(conservative_se_multiplier)
-        self.conservative_bracket_factor = float(conservative_bracket_factor)
+        self.conservative_bracket_factor = float(_conservative_bracket_factor)
         if not 0.0 < self.conservative_bracket_factor < 1.0:
-            raise ValueError("conservative_bracket_factor must be in (0, 1)")
-        self.conservative_min_norm_constraint = float(conservative_min_norm_constraint)
-        self.conservative_step_pct = float(conservative_step_pct)
-        self.conservative_max_steps = int(conservative_max_steps)
+            raise ValueError("_conservative_bracket_factor must be in (0, 1)")
+        self.conservative_min_norm_constraint = float(_conservative_min_norm_constraint)
+        self.conservative_step_pct = float(_conservative_step_pct)
+        self.conservative_max_steps = int(_conservative_max_steps)
 
         # Cross-validation setup
         self.kfold = KFold(n_splits=cv_folds, shuffle=True, random_state=random_state)
@@ -515,7 +505,7 @@ class OptunaHyperparameterTuner:
                 # the search (the status is recorded on the estimator); the final fit still shows it.
                 fold_params = params
                 if self.estimator_name == "CVXPYEstimator":
-                    fold_params = {**params, "solver_tolerance": self.cv_solver_tolerance}
+                    fold_params = {**params, "_solver_tolerance": self.cv_solver_tolerance}
                 estimator = self.estimator_class(**fold_params)
                 with warnings.catch_warnings():
                     warnings.filterwarnings("ignore", message="Solution may be inaccurate", category=UserWarning)

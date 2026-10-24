@@ -2,8 +2,9 @@ import numpy as np
 import pandas as pd
 import cvxpy as cp
 import warnings
-from typing import Optional, Union
+from typing import Optional, Sequence, Union
 from haldensity.core.defaults import DEFAULT_BASIS_ORDER
+from haldensity.core.options import take_deprecated
 from haldensity.core.basis.univariate import create_basis_functions
 from haldensity.core.solvers.cvxpy import (
     DEFAULT_SOLVER_THREADS,
@@ -54,71 +55,82 @@ class CVXPYEstimator(BaseEstimator):
     
     def __init__(
         self,
-        tol: float = 1e-4,
+        *,
         norm_constraint: float = 3.0,
-        n_grid_points: int = 200,
         basis_order: int = DEFAULT_BASIS_ORDER,
-        solver: str = "MOSEK",
+        max_knots: Union[int, str, None] = "auto",
+        solver_threads: int = DEFAULT_SOLVER_THREADS,
         log_dir: Optional[str] = None,
         log_frequency: int = 10,
-        use_secondary_solver: bool = True,
-        solver_waterfall: list[str] = ["MOSEK", "CLARABEL", "ECOS", "SCS"],
-        normalizer: str = "gauss_legendre",
-        max_knots: Union[int, str, None] = "auto",
-        solver_tolerance: str = "tight",
-        solver_threads: int = DEFAULT_SOLVER_THREADS,
+        # internal (leading underscore): numerical choices the package makes; for tests, benchmarks and
+        # experiment repositories only (docs/dev/DECISIONS.md)
+        _tol: float = 1e-4,
+        _n_grid_points: int = 200,
+        _solver: str = "MOSEK",
+        _use_secondary_solver: bool = True,
+        _solver_waterfall: Sequence[str] = ("MOSEK", "CLARABEL", "ECOS", "SCS"),
+        _normalizer: str = "gauss_legendre",
+        _solver_tolerance: str = "tight",
         _objective_normalizer: Optional[str] = None,
+        **deprecated,
     ):
         """
         Initialize CVXPY estimator.
-        
+
         Args:
-            tol: tol for pruning small theta coefficients
-            norm_constraint: One-norm constraint for theta[1:]
-            n_grid_points: Number of grid points for density evaluation
-            solver: CVXPY solver to use (default: "MOSEK")
-            normalizer: how the fitted density is normalized when evaluated (see BaseEstimator)
+            norm_constraint: the L1 bound M on theta[1:].
+            basis_order: the order k (default 2).
             max_knots: cap K on the number of candidate knots, placed at K data quantiles
                 (observations, de-duplicated). "auto" (default): K = 1,000 for basis_order >= 1 and
                 max(1,000, ceil(n^(2/3))) for basis_order = 0, so only samples above 1,000 are
                 affected (haldensity.core.univariate.objective.default_max_knots); None: every
-                unique data value (the behaviour before 0.2.0); an integer: that K.
-            solver_tolerance: "tight" (default; for the final fit at the chosen bound): the solvers
-                from `solver` and `solver_waterfall` with tight tolerances (MOSEK 1e-12; CLARABEL
-                1e-12 then 1e-10; ECOS 1e-12 then 1e-10; SCS 1e-9 capped at 600 s), each solution
-                pruned at `tol` and checked against the optimality conditions, the first certified
-                one kept; if none is, the best attempt from any solver (fewest coordinates failing
-                the conditions), with a warning and certified_ = False. The result is the point estimate and its
-                basis the delta-method SE basis; certified_, kkt_ and solve_attempts_ record the
-                check. "default": the solvers' own tolerances, first acceptable status wins, no
-                check (v0.1.0; OptunaHyperparameterTuner uses it in the CV folds).
+                unique data value; an integer: that K.
             solver_threads: threads per solver call (default 1: MOSEK, CLARABEL and the BLAS/OpenMP
                 pools run single-threaded, so parallel runs on shared servers do not take other
                 people's cores). Raise it when one fit runs alone on a dedicated machine.
+            log_dir, log_frequency: per-fit log file (log_frequency <= 0 turns it off).
+
+        The fit is one tight solve checked against the optimality conditions (MOSEK 1e-12, then
+        CLARABEL, ECOS and SCS with tight tolerances, the SCS step capped at 600 s); the first solution
+        that passes is the point estimate and its basis the delta-method SE basis (certified_, kkt_ and
+        solve_attempts_ record the check). If none passes, the best attempt is kept with a warning
+        (basis cleaning failed; no SE is given). The 0.1.0 options tol, n_grid_points, solver,
+        use_secondary_solver and solver_waterfall are still accepted through 0.2.x with a
+        DeprecationWarning (removed in 0.3.0).
         """
-        if solver_tolerance not in SOLVER_TOLERANCES:
-            raise ValueError(f"solver_tolerance must be one of {SOLVER_TOLERANCES}, got {solver_tolerance!r}")
+        legacy = take_deprecated("CVXPYEstimator", deprecated, {
+            "tol": "_tol", "n_grid_points": "_n_grid_points", "solver": "_solver",
+            "use_secondary_solver": "_use_secondary_solver", "solver_waterfall": "_solver_waterfall"})
+        _tol = legacy.get("_tol", _tol)
+        _n_grid_points = legacy.get("_n_grid_points", _n_grid_points)
+        _solver = legacy.get("_solver", _solver)
+        _use_secondary_solver = legacy.get("_use_secondary_solver", _use_secondary_solver)
+        _solver_waterfall = legacy.get("_solver_waterfall", _solver_waterfall)
+        if _solver_tolerance not in SOLVER_TOLERANCES:
+            raise ValueError(f"_solver_tolerance must be one of {SOLVER_TOLERANCES}, got {_solver_tolerance!r}")
         if _objective_normalizer is not None and _objective_normalizer not in OBJECTIVE_NORMALIZERS:
             raise ValueError(f"_objective_normalizer must be None or one of {OBJECTIVE_NORMALIZERS}")
         resolve_max_knots(max_knots, 1, basis_order)       # validates; the cap itself is set at fit time
         super().__init__(
-            normalizer=normalizer,
-            tol=tol,
+            normalizer=_normalizer,
+            tol=_tol,
             basis_order=basis_order,
             log_dir=log_dir or "./local/logs/cvxpy.log",
             log_frequency=log_frequency,
         )
         self.norm_constraint = norm_constraint
-        self.n_grid_points = n_grid_points
-        self.solver = solver
-        # Internal hook (tests, benchmarks, experiment repos): force the objective's normalizer, "midpoint"
-        # or "knot_aware"; None (always for users) lets the package choose by the order, see objective_rule_
+        self.n_grid_points = int(_n_grid_points)
+        self.solver = _solver
+        # internal hook: force the objective's normalizer, "midpoint" or "knot_aware"; None (always for
+        # users) lets the package choose by the order, see objective_rule_
         self._objective_normalizer = _objective_normalizer
         self.max_knots = max_knots if max_knots is None or isinstance(max_knots, str) else int(max_knots)
-        self.solver_tolerance = solver_tolerance
+        self.solver_tolerance = _solver_tolerance
         thread_options("MOSEK", solver_threads)            # validates
         self.solver_threads = int(solver_threads)
-        
+        self.use_secondary_solver = bool(_use_secondary_solver)
+        self.solver_waterfall = list(_solver_waterfall)
+
         # Internal, non-standard attributes for inspection
         self.optimized_theta_raw: Optional[np.ndarray] = None
         self.lambda_val_lag: Optional[float] = None
@@ -132,8 +144,6 @@ class CVXPYEstimator(BaseEstimator):
         self.solve_attempts_: tuple = ()
         self.support_ = None
         self.solver_option_: Optional[str] = None
-        self.use_secondary_solver = use_secondary_solver
-        self.solver_waterfall = solver_waterfall
         self.solver_used_: Optional[str] = None
         self.problem_status_: Optional[str] = None
         
@@ -220,7 +230,7 @@ class CVXPYEstimator(BaseEstimator):
         return resolve_objective_normalizer(self._objective_normalizer or "auto", self.basis_order)[0]
 
     def _default_solve(self, data: pd.DataFrame, grid_points_hal: np.ndarray):
-        """solver_tolerance="default": the solvers' own tolerances, first acceptable status wins (v0.1.0)."""
+        """_solver_tolerance="default": the solvers' own tolerances, first acceptable status wins (v0.1.0)."""
         structured = (
             self._objective == "knot_aware"
             and self.basis_order in STRUCTURED_ORDERS
@@ -264,7 +274,7 @@ class CVXPYEstimator(BaseEstimator):
 
 
     def _tight_solve(self, data: pd.DataFrame, grid_points_hal: np.ndarray):
-        """solver_tolerance="tight": one certified solve (haldensity.core.univariate.support.certified_solve)."""
+        """_solver_tolerance="tight": one certified solve (haldensity.core.univariate.support.certified_solve)."""
         problem = FullDataHALProblem(data, self.basis_order, self.n_grid_points, self._objective,
                                      self.max_knots, structured=self._knot_aware_formulation == "structured")
         if not np.array_equal(problem.knots, grid_points_hal):

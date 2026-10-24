@@ -11,9 +11,7 @@ from haldensity.core.variance import density_confidence_interval, estimate_covar
 from haldensity.full_uni import CVXPYEstimator
 
 POINTS = np.linspace(0.05, 0.95, 7)
-FREE = dict(solver="CLARABEL", solver_waterfall=["CLARABEL", "ECOS"], log_frequency=-1)
-
-
+FREE = dict(_solver="CLARABEL", _solver_waterfall=["CLARABEL", "ECOS"], log_frequency=-1)
 @pytest.fixture
 def data():
     return pd.DataFrame({"W1": np.random.default_rng(4).beta(2.0, 5.0, size=200)})
@@ -30,7 +28,7 @@ def cleaning_fails(monkeypatch):
 def test_point_estimate_but_no_se(data, cleaning_fails, tolerance):
     with warnings.catch_warnings(record=True) as fit_warnings:
         warnings.simplefilter("always")
-        fit = CVXPYEstimator(norm_constraint=20.0, basis_order=1, solver_tolerance=tolerance, **FREE).fit(data)
+        fit = CVXPYEstimator(norm_constraint=20.0, basis_order=1, _solver_tolerance=tolerance, **FREE).fit(data)
     if tolerance == "tight":
         assert any("Basis cleaning failed" in str(w.message) for w in fit_warnings) and fit.certified_ is False
     results = fit.get_results()

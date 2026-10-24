@@ -17,8 +17,8 @@ def test_repeated_fits_do_not_grow_the_number_of_open_files(tmp_path):
     log = str(tmp_path / "logs" / "cvxpy.log")
 
     def fit_once():
-        est = CVXPYEstimator(norm_constraint=5.0, basis_order=0, log_dir=log, log_frequency=1, solver="CLARABEL",
-                             solver_waterfall=["CLARABEL", "ECOS"])
+        est = CVXPYEstimator(norm_constraint=5.0, basis_order=0, log_dir=log, log_frequency=1, _solver="CLARABEL",
+                             _solver_waterfall=["CLARABEL", "ECOS"])
         est.fit(data)
         est.get_results()                               # logs the number of selected knots
         return est
@@ -34,8 +34,8 @@ def test_each_estimator_starts_its_log_afresh(tmp_path):
     log = tmp_path / "est.log"
     log.write_text("old run\n")
     data = pd.DataFrame({"W1": np.random.default_rng(1).beta(2.0, 5.0, size=80)})
-    est = CVXPYEstimator(norm_constraint=5.0, basis_order=0, log_dir=str(log), log_frequency=1, solver="CLARABEL",
-                         solver_waterfall=["CLARABEL", "ECOS"]).fit(data)
+    est = CVXPYEstimator(norm_constraint=5.0, basis_order=0, log_dir=str(log), log_frequency=1, _solver="CLARABEL",
+                         _solver_waterfall=["CLARABEL", "ECOS"]).fit(data)
     est.get_results()
     text = log.read_text()
     assert "old run" not in text and "selected knots" in text

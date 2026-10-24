@@ -99,11 +99,11 @@ def _limit_threads(mosek_threads: int) -> None:
 
 def _estimator(k: int, config: str, M: float, solver_tolerance: str):
     from haldensity.full_uni import CVXPYEstimator
-    extra = dict(solver_waterfall=FIT_SOLVERS) if solver_tolerance == "tight" else {}
+    extra = dict(_solver_waterfall=FIT_SOLVERS) if solver_tolerance == "tight" else {}
     fit = CVXPYEstimator(norm_constraint=M, basis_order=k, log_frequency=-1,
                          _objective_normalizer="midpoint" if config == "A" else "knot_aware",
                          max_knots=int(config[1:]) if config.startswith("C") else None,
-                         solver_tolerance=solver_tolerance, **extra)
+                         __solver_tolerance=solver_tolerance, **extra)
     if config == "D":
         fit._knot_aware_formulation = "dense"
     return fit

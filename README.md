@@ -61,7 +61,7 @@ rng = np.random.default_rng(0)
 data = pd.DataFrame({"W1": np.clip(rng.normal(0.07, 0.02, size=2000), 0, 1)})
 
 # Fit CVX-based estimator
-est = CVXPYEstimator(basis_order=0, norm_constraint=20, n_grid_points=200)
+est = CVXPYEstimator(basis_order=0, norm_constraint=20)
 est.fit(data)
 
 # Evaluate density on a fine grid

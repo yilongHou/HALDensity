@@ -12,9 +12,7 @@ from haldensity.full_uni import CVXPYEstimator
 
 CASES = [(0, "midpoint", 5.0), (0, "midpoint", 20.0), (1, "midpoint", 20.0), (1, "midpoint", 50.0),
          (2, "midpoint", 20.0), (2, "midpoint", 100.0), (0, "knot_aware", 20.0), (1, "knot_aware", 50.0)]
-FREE_SOLVERS = dict(solver="CLARABEL", solver_waterfall=["CLARABEL", "ECOS", "SCS"])
-
-
+FREE_SOLVERS = dict(_solver="CLARABEL", _solver_waterfall=["CLARABEL", "ECOS", "SCS"])
 @pytest.fixture(scope="module")
 def data():
     return pd.DataFrame({"W1": np.random.default_rng(200).beta(2.0, 5.0, size=200)})
@@ -48,7 +46,7 @@ def test_tight_tolerances_reach_every_solver(monkeypatch, data):
     # solver_tolerance="default" passes no tolerance (v0.1.0), only the thread setting
     calls.clear()
     with pytest.raises(RuntimeError):
-        CVXPYEstimator(norm_constraint=10.0, basis_order=1, log_frequency=-1, solver_tolerance="default",
+        CVXPYEstimator(norm_constraint=10.0, basis_order=1, log_frequency=-1, _solver_tolerance="default",
                        _objective_normalizer="midpoint").fit(data)
     assert calls and all(set(c) == {"solver"} | set(thread_options(c["solver"])) for c in calls)
 
@@ -62,7 +60,7 @@ def test_tight_ladder_follows_the_solver_settings():
 def test_the_final_fit_is_the_old_cleaned_basis(data, k, normalizer, M):
     # v0.1.0 fit + separate cleaning refit (free solvers, as before MOSEK joined the ladder) ...
     old = CVXPYEstimator(norm_constraint=M, basis_order=k, _objective_normalizer=normalizer, log_frequency=-1,
-                         solver_tolerance="default").fit(data)
+                         _solver_tolerance="default").fit(data)
     cleaned = refit_support_from_estimator(old, data, ladder=tight_ladder(["CLARABEL", "ECOS", "SCS"]))
     # ... equals the single tight fit with the same solvers: point estimate and SE basis at once
     new = CVXPYEstimator(norm_constraint=M, basis_order=k, _objective_normalizer=normalizer, log_frequency=-1,
@@ -147,6 +145,6 @@ def test_failing_coordinates_are_counted_for_either_bound(data):
 
 def test_invalid_solver_tolerance(data):
     with pytest.raises(ValueError, match="solver_tolerance"):
-        CVXPYEstimator(solver_tolerance="loose")
+        CVXPYEstimator(_solver_tolerance="loose")
     assert FullDataHALProblem(data, 1, objective_normalizer="midpoint").build(10.0).formulation == "dense"
     assert FullDataHALProblem(data, 1).build(10.0).formulation == "structured"     # "auto" at k = 1

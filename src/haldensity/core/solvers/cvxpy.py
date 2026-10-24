@@ -178,7 +178,7 @@ def solve_cvxpy_problem(
     ) from last_exception
 
 
-# Tight settings for the final fit at the chosen bound (CVXPYEstimator(solver_tolerance="tight") and
+# Tight settings for the final fit at the chosen bound (CVXPYEstimator's default tight solve and
 # basis cleaning): per solver, the configurations tried in order. MOSEK's interior-point tolerances
 # (relative gap, primal and dual feasibility) are 1e-12; NEAR_REL = 1 stops MOSEK from reporting a
 # solution that only meets 1000 x those tolerances as "optimal", so such a stop shows up as

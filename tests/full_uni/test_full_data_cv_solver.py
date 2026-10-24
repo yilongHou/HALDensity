@@ -50,7 +50,7 @@ def test_cv_falls_back_like_the_final_fit_when_mosek_is_unavailable(mosek_unavai
 
 
 def test_cv_ecos_only_option(mosek_unavailable):
-    tuner = _tuner(estimator_kwargs={"solver": "ECOS", "use_secondary_solver": False})
+    tuner = _tuner(estimator_kwargs={"_solver": "ECOS", "_use_secondary_solver": False})
     tuner.optimize(n_trials=2, show_progress=False)
 
     assert all(np.isfinite(trial.value) for trial in tuner.study.trials)
@@ -77,7 +77,7 @@ def test_estimator_kwargs_must_not_overlap_tuned_parameters():
 
 
 def test_final_fit_uses_the_best_trials_full_settings(mosek_unavailable):
-    tuner = _tuner(estimator_kwargs={"solver": "ECOS", "use_secondary_solver": False})
+    tuner = _tuner(estimator_kwargs={"_solver": "ECOS", "_use_secondary_solver": False})
     tuner.optimize(n_trials=2, show_progress=False)
 
     assert "basis_order" not in tuner.best_params  # fixed override, not suggested by Optuna

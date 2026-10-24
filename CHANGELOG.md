@@ -87,6 +87,23 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   all-NaN covariance and `density_confidence_interval` the point estimate with NaN `se`, `lower` and
   `upper`, each with a warning that suggests a bootstrap or another solver; before, the SE was
   computed on that basis with a warning. `support_refit=None` still gives the original-basis SE.
+- **Numerical options are the package's choice** (Yilong, 2026-10-24). Public options of
+  `CVXPYEstimator`: `norm_constraint`, `basis_order`, `max_knots` (None = every knot), `solver_threads`,
+  `log_dir`, `log_frequency`; of `OptunaHyperparameterTuner`: `cv_folds`, `metric`, `random_state`,
+  `max_iter` and `tolerance` (first-order estimators), `log_frequency`, `silent`, `show_progress`,
+  `param_overrides`, `estimator_kwargs`, `use_conservative_adjustment` and its margin settings; of the
+  variance functions: `support_refit` and `alpha`. Options that were public in 0.1.0 still work through
+  0.2.x with a `DeprecationWarning` naming the internal replacement and are removed in 0.3.0:
+  `CVXPYEstimator(tol, n_grid_points, solver, use_secondary_solver, solver_waterfall)` -> `_tol`,
+  `_n_grid_points`, `_solver`, `_use_secondary_solver`, `_solver_waterfall`;
+  `estimate_covariance_beta(ridge_param)` -> `_ridge_param`; `OptunaHyperparameterTuner(n_grid_points)`
+  had no effect and only warns. Options added during the restructure are internal directly:
+  `_normalizer`, `_solver_tolerance`, `_objective_normalizer` (estimator), `_cv_scoring`,
+  `_cv_solver_tolerance` and the conservative search's `_conservative_bracket_factor`,
+  `_conservative_min_norm_constraint`, `_conservative_step_pct`, `_conservative_max_steps` (tuner).
+  Internal names are for tests, benchmarks and experiment repositories. Arguments after `data`
+  (tuner) and all estimator arguments are keyword-only, so a 0.1.0 positional call fails loudly
+  instead of shifting values.
 - **Internal safeguard at k = 0** (Yilong, 2026-10-24; `haldensity.core.univariate.imbalance`): every
   k = 0 fit records coefficient-imbalance diagnostics in `get_results()["imbalance"]`, and the final
   fit warns if adjacent selected knots less than 1e-3 apart carry opposite-sign coefficients both
@@ -145,8 +162,8 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
 - `OptunaHyperparameterTuner` uses 5 CV folds by default (`TUNER_DEFAULTS.cv_folds`, as the
   censored-data tuners) instead of 3, so default full-data CV results change; `cv_folds=3` gives
   the old split.
-- The final fit is one tight, certified solve (`CVXPYEstimator(solver_tolerance="tight")`, the
-  new default): MOSEK with interior-point tolerances 1e-12 (relative gap, primal and dual
+- The final fit is one tight, certified solve (the
+  new default; `_solver_tolerance="tight"` internally): MOSEK with interior-point tolerances 1e-12 (relative gap, primal and dual
   feasibility), then CLARABEL 1e-12/1e-10, ECOS 1e-12/1e-10, SCS 1e-9 capped at 600 s
   (`haldensity.core.solvers.TIGHT_LADDER`, following `solver` / `solver_waterfall`); each solution
   is pruned at `tol` (1e-4) and checked against the optimality conditions, the first certified one
@@ -163,11 +180,11 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   "optimal_inaccurate", MOSEK's near-optimal stop made visible) in 19. Without MOSEK the final fit
   equals the previous fit + cleaning refit bit for bit. Cost: about the old fit + refit; at n =
   1,000, 0.6-0.8 s when MOSEK certifies, 2-6 s when CLARABEL or ECOS has to. CV folds keep the
-  solvers' own tolerances (`OptunaHyperparameterTuner(cv_solver_tolerance="default")`); the old
-  final fit is `solver_tolerance="default"` (bit for bit). The optimality check now also handles a
+  solvers' own tolerances (internally `_cv_solver_tolerance="default"`); the old
+  final fit is the internal `_solver_tolerance="default"` (bit for bit). The optimality check now also handles a
   bound that is not binding (||theta[1:]||_1 < (1 - 1e-3) M: certified when max |gradient| / n <=
   1e-5; at the bound either test certifies), and basis
-  cleaning of `solver_tolerance="default"` fits starts with MOSEK 1e-12 as well.
+  cleaning of `_solver_tolerance="default"` fits starts with MOSEK 1e-12 as well.
 - `haldensity.rc.fit_right_censored(method=...)` and `fit_ipcw_hal`, `fit_l1mle_m1`,
   `fit_cvl1mle` (default method), `fit_undersmoothed`: the four right-censored point estimators
   with the same inputs and outputs (`RightCensoredPointEstimate`).
@@ -203,12 +220,12 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   200-point grid. In 16 simulated datasets (4 densities, n = 400 and 1,280, k = 1) the selected
   bound was unchanged in 11; in the 4 n = 1,280 cases where the old score picked a much larger M,
   held-out log-likelihood rose by 0.019-0.030 nats and L2 error fell by 0.33-0.56. Old
-  behaviour: `cv_scoring="interpolated"` with `estimator_kwargs={"normalizer": "midpoint"}`.
+  behaviour (internal hooks): `_cv_scoring="interpolated"` with `estimator_kwargs={"_normalizer": "midpoint"}`.
 - Full-data estimators evaluate and report the density with an accurate normalizer: log Z by
   cell-wise Gauss-Legendre with breakpoints at the knots with nonzero coefficients (32 nodes per
   cell, doubled until the change is below 1e-12; exact for k = 0), in float64. The midpoint rule
   on the fitting grid underestimated Z for spiky fits (0.175 nats at k = 1, M = 1e5, n = 1280).
-  The fitting objective is unchanged. Old behaviour: `normalizer="midpoint"`. New:
+  The fitting objective is unchanged. Old behaviour (internal hook): `_normalizer="midpoint"`. New:
   `estimator.log_normalizer()`, `estimator.get_log_density_at_points()`. Censored-data estimators
   keep the normalizer frozen on their own fitting grid.
 - Default CVXPY solver: MOSEK, then CLARABEL, ECOS, SCS (was ECOS only); a solve is accepted

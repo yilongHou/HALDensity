@@ -29,12 +29,12 @@ certifies the result with :func:`kkt_report`:
   solution passing either test is certified (lambda may be ~0 there).
 
 The same routine (:func:`certified_solve`, MOSEK 1e-12 first) is the final fit
-of ``CVXPYEstimator(solver_tolerance="tight")``, its default: there the
+of ``CVXPYEstimator`` (its default tight solve): there the
 certified solution is both the point estimate and the SE basis, and no
 separate refit is made.
 
 A separate refit (:func:`refit_support`, for a fit made with
-``solver_tolerance="default"``) is used only for the SE (``support_refit=`` of
+the internal ``_solver_tolerance="default"``) is used only for the SE (``support_refit=`` of
 the functions in :mod:`haldensity.core.variance`); the point estimate stays that
 fit. A solution that fails certification is kept and flagged
 (``certified=False``). The
