@@ -23,6 +23,7 @@ from haldensity.core.univariate.objective import (
     resolve_objective_normalizer,
     structured_problem,
 )
+from haldensity.core.univariate.imbalance import check_imbalance, imbalance_diagnostics
 from haldensity.core.univariate.support import FullDataHALProblem, certified_solve
 
 
@@ -125,6 +126,7 @@ class CVXPYEstimator(BaseEstimator):
         self.max_knots_used_: Optional[int] = None
         self.objective_rule_: Optional[str] = None
         self.objective_normalizer_used_: Optional[str] = None
+        self.imbalance_: Optional[dict] = None
         self.certified_: Optional[bool] = None
         self.kkt_: Optional[dict] = None
         self.solve_attempts_: tuple = ()
@@ -178,6 +180,15 @@ class CVXPYEstimator(BaseEstimator):
             self.theta_hat[self.basis_order + 1:], 
             0
         )
+        # internal safeguard at k = 0 (haldensity.core.univariate.imbalance): recorded for every fit,
+        # a warning asking for a report if the final fit shows the coefficient imbalance
+        self.imbalance_ = None
+        if self.basis_order == 0:
+            observed_x = self._train_x[np.isfinite(self._train_x)]
+            if self.solver_tolerance == "tight":
+                self.imbalance_ = check_imbalance(self.theta_hat, grid_points_hal, observed_x, stacklevel=3)
+            else:
+                self.imbalance_ = imbalance_diagnostics(self.theta_hat, grid_points_hal, observed_x)
         
         # Determine the selected grid points based on non-zero coefficients in theta_hat
         knot_coeffs_start_index = self.basis_order + 1
@@ -319,6 +330,7 @@ class CVXPYEstimator(BaseEstimator):
             "n_grid_points": int(self.n_grid_points),
             "objective_normalizer": self._objective,       # the implemented normalizer (cleaning rebuilds it)
             "objective_rule": self.objective_rule_,
+            "imbalance": self.imbalance_,
             "max_knots": self.max_knots,
             "max_knots_used": self.max_knots_used_,
             "n_candidate_knots": int(len(self._grid_points_hal)),

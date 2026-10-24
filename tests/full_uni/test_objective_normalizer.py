@@ -1,3 +1,4 @@
+import warnings
 import cvxpy as cp
 import numpy as np
 import pandas as pd
@@ -51,11 +52,17 @@ def test_k0_knot_aware_objective_is_the_exact_integral(data):
 
 def test_knot_aware_removes_the_k0_spike(data):
     x = data["W1"].to_numpy()
-    train_ll = {}
+    train_ll, flagged = {}, {}
     for name in ("midpoint", "knot_aware"):
-        fit = CVXPYEstimator(norm_constraint=50.0, basis_order=0, _objective_normalizer=name, log_frequency=-1).fit(data)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            fit = CVXPYEstimator(norm_constraint=50.0, basis_order=0, _objective_normalizer=name,
+                                 log_frequency=-1).fit(data)
         train_ll[name] = float(np.mean(fit.get_log_density_at_points(x)))
+        flagged[name] = any("Internal check failed" in str(w.message) for w in caught)
     assert train_ll["knot_aware"] > 0.5 and train_ll["knot_aware"] > train_ll["midpoint"]
+    # the forced old midpoint rule spikes at k = 0 and the internal safeguard says so; the exact objective does not
+    assert flagged == {"midpoint": True, "knot_aware": False}
 
 
 def test_k1_knot_aware_sees_more_of_the_mass_than_the_midpoint_grid(data):

@@ -87,6 +87,13 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   all-NaN covariance and `density_confidence_interval` the point estimate with NaN `se`, `lower` and
   `upper`, each with a warning that suggests a bootstrap or another solver; before, the SE was
   computed on that basis with a warning. `support_refit=None` still gives the original-basis SE.
+- **Internal safeguard at k = 0** (Yilong, 2026-10-24; `haldensity.core.univariate.imbalance`): every
+  k = 0 fit records coefficient-imbalance diagnostics in `get_results()["imbalance"]`, and the final
+  fit warns if adjacent selected knots less than 1e-3 apart carry opposite-sign coefficients both
+  above 10 in absolute value (flag A), or coefficients above 10 carry more than half of ||theta||_1
+  (flag B). With the package's objective this pattern (Yilong's CVLL note) should not occur (0 of 800
+  fits in session 69's check), so the warning reports a numerical problem inside the package and
+  asks for a report; it is not a setting, and nothing is refitted or adjusted.
 - **The objective's normalizer is chosen by order, by the package** (Yilong, 2026-10-24; not a user
   option): the exact objective at k = 0, the midpoint rule with the knots added to the grid at k = 1
   (both through the step-height rewrite), the old midpoint rule (199 fixed cells) at k >= 2. **Default
