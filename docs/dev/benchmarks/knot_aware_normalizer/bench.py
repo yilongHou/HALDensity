@@ -47,6 +47,9 @@ MEMORY_CAP_GB = 64.0
 TIME_CAP_S = 3600.0
 SPIKE_GAP_NATS = 0.01
 OPPOSITE_FRACTION = 0.1          # "large": both coefficients >= 10% of the largest knot coefficient
+# Final-fit ladder for the fixed-bound fits: the tight ladder without its SCS step (option (b), Yilong
+# 2026-10-24: SCS takes 20-60+ min per fit at n = 20,000); uncertified fits are recorded with their violations.
+FIT_SOLVERS = ["MOSEK", "CLARABEL", "ECOS"]
 
 # --------------------------------------------------------------------------------------------- truths
 JUMP = (np.array([0.0, 0.3, 0.6, 1.0]), np.array([0.6, 1.8, 0.7]))          # breaks, levels (integral 1)
@@ -96,10 +99,11 @@ def _limit_threads(mosek_threads: int) -> None:
 
 def _estimator(k: int, config: str, M: float, solver_tolerance: str):
     from haldensity.full_uni import CVXPYEstimator
+    extra = dict(solver_waterfall=FIT_SOLVERS) if solver_tolerance == "tight" else {}
     fit = CVXPYEstimator(norm_constraint=M, basis_order=k, log_frequency=-1,
                          objective_normalizer="midpoint" if config == "A" else "knot_aware",
                          max_knots=int(config[1:]) if config.startswith("C") else None,
-                         solver_tolerance=solver_tolerance)
+                         solver_tolerance=solver_tolerance, **extra)
     if config == "D":
         fit.knot_aware_formulation = "dense"
     return fit
@@ -171,6 +175,28 @@ def _diagnostics(fit, k: int, truth: str) -> dict:
     return out
 
 
+def _violations(fit, x: np.ndarray, k: int, config: str) -> dict:
+    """The KKT failures of the final fit's raw solution: kept coefficients with |gradient| < 0.99 lambda
+    (should be zero) and coefficients with |gradient| > 1.01 lambda (missing), with their sizes."""
+    import pandas as pd
+    from haldensity.core.univariate.support import KKT_SLACK, MAX_RATIO, FullDataHALProblem
+    problem = FullDataHALProblem(pd.DataFrame({"W1": x}), k, 200, "midpoint" if config == "A" else "knot_aware",
+                                 int(config[1:]) if config.startswith("C") else None)
+    theta = np.asarray(fit.optimized_theta_raw, dtype=float)
+    first = 1 if k == 0 else k + 1
+    g, t = problem.gradient(theta)[first:], theta[first:]
+    lam = fit.kkt_["lambda_hat"]
+    kept = np.abs(t) > fit.tol
+    ratio = np.abs(g) / lam if lam > 0 else np.zeros_like(g)
+    low, high = kept & (ratio < KKT_SLACK), ratio > MAX_RATIO
+    scale = float(np.abs(theta[1:]).sum())
+    return dict(viol_low=int(low.sum()), viol_low_l1=float(np.abs(t[low]).sum()),
+                viol_low_l1_share=float(np.abs(t[low]).sum() / scale) if scale else 0.0,
+                viol_low_max=float(np.abs(t[low]).max(initial=0.0)), viol_high=int(high.sum()),
+                kkt_max_ratio=fit.kkt_["max_ratio"], kkt_lambda=lam, kkt_bound=fit.kkt_["bound"],
+                kkt_n_kept=fit.kkt_["n_kept"], l1_over_M=scale / float(fit.norm_constraint))
+
+
 def child_fit(k: int, truth: str, config: str, n: int, M: float, seed: int) -> dict:
     import pandas as pd
     x = sample(truth, n, seed)
@@ -202,6 +228,7 @@ def child_fit(k: int, truth: str, config: str, n: int, M: float, seed: int) -> d
                    attempts=[{key: a.get(key) for key in ("solver", "option", "formulation", "status", "outcome",
                                                           "certified", "seconds")} for a in fit.solve_attempts_])
         out.update(_diagnostics(fit, k, truth))
+        out.update(_violations(fit, x, k, config))
     return out
 
 
