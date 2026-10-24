@@ -283,7 +283,9 @@ def _key(task: tuple) -> str:
 def run_one(task: tuple, mosek_threads: int) -> dict:
     """Run one task in a child process; stop it at the memory or time cap and record "exceeded"."""
     import psutil
-    env = dict(os.environ, OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1",
+    # CLARABEL's Rayon pool and BLAS otherwise use every core: on a 256-core machine one dense k = 1 fit at
+    # n = 5,000 took 17,000 CPU-s in 300 s wall without RAYON_NUM_THREADS=1, 177 CPU-s in 176 s with it
+    env = dict(os.environ, OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1", RAYON_NUM_THREADS="1",
                BENCH_MOSEK_THREADS=str(mosek_threads))
     cmd = [sys.executable, __file__, *[str(v) for v in task]]
     started = time.perf_counter()
