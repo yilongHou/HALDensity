@@ -106,3 +106,61 @@ def test_covariance_carries_its_basis(data, fit):
     assert density_confidence_interval(POINTS, results, original_cov, 1).attrs["basis"] == "original"
     assert density_confidence_interval(POINTS, results, cleaned_cov, 1).attrs["basis"] == "cleaned"
     assert density_confidence_interval(POINTS, results, np.asarray(original_cov), 1).attrs["basis"] == "original"
+
+
+# ----- proposed repair of an uncertified final fit (repair_support; off by default) -----
+
+def _with_residue(refit):
+    theta = refit.theta_raw.copy()
+    inactive = 2 + int(np.flatnonzero(np.abs(theta[2:]) <= 1e-8)[0])
+    theta[inactive] = 1e-3                     # a kept coefficient the optimality conditions say is zero
+    return theta, inactive
+
+
+def test_repair_by_zeroing_certifies_a_small_residue(data, refit):
+    from haldensity.core.univariate.support import repair_support
+    problem = FullDataHALProblem(data, basis_order=1)
+    theta, inactive = _with_residue(refit)
+    fixed = repair_support(problem, theta, refit.norm_constraint, polish=False)
+    assert fixed["applied"] and fixed["certified"] and fixed["theta_raw"][inactive] == 0.0
+    assert fixed["removed"] == 1 and fixed["removed_l1"] == pytest.approx(1e-3)
+
+
+def test_repair_by_polishing_recovers_the_certified_solution(data, refit):
+    from haldensity.core.univariate.support import repair_support
+    problem = FullDataHALProblem(data, basis_order=1)
+    theta, inactive = _with_residue(refit)
+    fixed = repair_support(problem, theta, refit.norm_constraint, polish=True)
+    assert fixed["certified"] and fixed["rounds"] == 1 and fixed["theta_raw"][inactive] == 0.0
+    np.testing.assert_allclose(problem.objective(fixed["theta_raw"]), problem.objective(refit.theta_raw), rtol=1e-8)
+
+
+def test_repair_is_not_applied_to_large_violations(data, refit):
+    from haldensity.core.univariate.support import repair_support
+    problem = FullDataHALProblem(data, basis_order=1)
+    theta = refit.theta_raw.copy()
+    inactive = 2 + np.flatnonzero(np.abs(theta[2:]) <= 1e-8)[:5]
+    theta[inactive] = 0.5                      # 2.5 of the L1 norm 20 sits on coefficients that should be zero
+    fixed = repair_support(problem, theta, refit.norm_constraint)
+    assert not fixed["applied"] and not fixed["certified"] and "L1 norm" in fixed["reason"]
+
+
+def test_certified_solve_repairs_only_when_asked(monkeypatch, data, refit):
+    import haldensity.core.univariate.support as support
+    from haldensity.core.univariate.support import certified_solve
+    real = support.FullDataHALProblem.build
+    residue, _ = _with_residue(refit)
+
+    def with_residue(self, norm_constraint, dense=False):    # every solve returns a solution with a residue
+        built = real(self, norm_constraint, dense=dense)
+        built.theta = lambda: residue.copy()
+        return built
+
+    monkeypatch.setattr(support.FullDataHALProblem, "build", with_residue)
+    tight = support.LADDER[1:2]                                # CLARABEL 1e-12
+    problem = FullDataHALProblem(data, basis_order=1)
+    assert not certified_solve(problem, refit.norm_constraint, tight).certified
+    repaired = certified_solve(problem, refit.norm_constraint, tight, repair="zero")
+    assert repaired.certified and repaired.option.endswith("repair zero") and repaired.attempts[-1]["removed"] == 1
+    with pytest.raises(ValueError, match="repair"):
+        certified_solve(problem, refit.norm_constraint, tight, repair="yes")

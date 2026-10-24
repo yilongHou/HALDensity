@@ -59,6 +59,7 @@ from haldensity.core.basis.univariate import create_basis_functions
 from haldensity.core.solvers.cvxpy import TIGHT_LADDER
 from haldensity.core.univariate.objective import (
     STRUCTURED_ORDERS,
+    _tail_sums,
     candidate_knots,
     normalizer_terms,
     objective_gradient,
@@ -74,6 +75,11 @@ BIG_FRACTION = 0.1
 SLACK_GRADIENT_TOL = 1e-5    # lambda / n at most this: the bound is not binding; then certified when
                              # max |gradient_j| / n is at most this too
 ACTIVE_BOUND = 1e-3          # a binding bound needs ||theta[1:]||_1 >= (1 - this) * M
+# Proposed repair of an uncertified final fit (repair_support; not used by default)
+REPAIR_MAX_SHARE = 0.01      # the coefficients set to zero may hold at most this share of ||theta[1:]||_1
+REPAIR_MAX_ROUNDS = 5        # polish: re-solve on the support at most this often
+REPAIR_MAX_SUPPORT = 2000    # polish: largest support solved directly
+REPAIR_ADD_PER_ROUND = 100   # polish: most coordinates added to the support per round
 _OK_STATUSES = ("optimal", "optimal_inaccurate")
 
 
@@ -138,6 +144,50 @@ class FullDataHALProblem:
     def gradient(self, theta: np.ndarray) -> np.ndarray:
         """Gradient of the summed negative log-likelihood (the objective's own normalizer) at ``theta``."""
         return objective_gradient(theta, self.x, self.knots, self.basis_order, self.terms)
+
+    def objective(self, theta: np.ndarray) -> float:
+        """The summed negative log-likelihood with the objective's own normalizer at ``theta``."""
+        from scipy.special import logsumexp
+
+        from haldensity.core.univariate.normalizer import log_unnormalized_density
+        theta = np.asarray(theta, dtype=float)
+        cells = self.terms.log_density(theta, self.knots, self.basis_order)
+        data = log_unnormalized_density(self.x, theta, self.knots, self.basis_order)
+        return float(-data.sum() + self.n * logsumexp(self.terms.log_widths + cells))
+
+    def solve_on_support(self, support: np.ndarray, norm_constraint: float,
+                         ladder: tuple[tuple[str, str, dict[str, Any]], ...]) -> tuple[Optional[np.ndarray], str]:
+        """The problem restricted to the knot coordinates ``support`` (plus the polynomial ones).
+
+        The data term is linear in theta (its coefficients are the basis column sums), so the restricted
+        problem has only ``cells x |support|`` entries. Returns the full-length solution and the solver.
+        """
+        k, n = self.basis_order, self.n
+        first = 1 if k == 0 else k + 1
+        knots = self.knots[support]
+        sums = np.concatenate(([float(n)], [float(np.sum(self.x ** r)) for r in range(1, k + 1)],
+                               _tail_sums(self.x, np.ones(n), knots, k)))
+        points = self.terms.points
+        columns = [np.ones_like(points)] + [points ** r for r in range(1, k + 1)]
+        if knots.size:
+            columns.append((points[:, None] >= knots[None, :]).astype(float) if k == 0
+                           else np.maximum(points[:, None] - knots[None, :], 0.0) ** k)
+        cells = np.column_stack(columns)
+        theta = cp.Variable(cells.shape[1])
+        loss = -(sums / n) @ theta + cp.log_sum_exp(self.terms.log_widths + cells @ theta)     # objective / n
+        restricted = cp.Problem(cp.Minimize(loss), [cp.norm1(theta[1:]) <= float(norm_constraint)])
+        for solver, label, options in ladder:
+            try:
+                _solve_quietly(restricted, solver, options)
+            except Exception:  # solver availability and failures vary by platform
+                continue
+            value = theta.value
+            if str(restricted.status) in _OK_STATUSES and value is not None and np.all(np.isfinite(value)):
+                full = np.zeros(first + self.knots.size)
+                full[:first] = value[:first]
+                full[first + np.asarray(support, dtype=int)] = value[first:]
+                return full, f"{solver} {label}"
+        return None, ""
 
 
 def _solve_quietly(problem: cp.Problem, solver: str, options: dict[str, Any]) -> None:
@@ -210,18 +260,94 @@ class SupportRefit:
         return int(np.count_nonzero(self.theta[first:]))
 
 
+def repair_support(problem: FullDataHALProblem, theta: np.ndarray, norm_constraint: float, *,
+                   polish: bool = True, prune: float = PRUNE, max_share: float = REPAIR_MAX_SHARE,
+                   ladder: tuple[tuple[str, str, dict[str, Any]], ...] = LADDER) -> dict[str, Any]:
+    """Proposed rule (not the default) for a solution that fails the optimality check at a binding bound.
+
+    The kept coefficients whose gradient is below 0.99 lambda (the conditions say they are zero) are set
+    to zero if together they hold at most ``max_share`` of ||theta[1:]||_1. ``polish=False``: the check
+    is re-run on that vector. ``polish=True``: the problem is re-solved on the remaining support and
+    checked against the full gradient; coordinates the check says are missing (gradient above 1.01
+    lambda) are added and the support re-solved, at most ``REPAIR_MAX_ROUNDS`` times. Returns the
+    repaired raw solution, its check, and how many coefficients were removed or added (and their size).
+    """
+    started = perf_counter()
+    theta = np.asarray(theta, dtype=float)
+    M = float(norm_constraint)
+    k = problem.basis_order
+    first = 1 if k == 0 else k + 1
+    report = kkt_report(problem, theta, prune, norm_constraint=M)
+    out: dict[str, Any] = dict(applied=False, certified=report["certified"], theta_raw=theta, kkt=report,
+                               removed=0, removed_l1=0.0, removed_share=0.0, added=0, rounds=0, reason="",
+                               polish_solver="")
+    if report["certified"] or report["bound"] != "active":
+        out.update(reason="already certified" if report["certified"] else "bound not binding",
+                   seconds=perf_counter() - started)
+        return out
+    knot_theta = theta[first:]
+    ratio = np.abs(problem.gradient(theta)[first:]) / report["lambda_hat"]
+    kept = np.abs(knot_theta) > prune
+    low = kept & (ratio < KKT_SLACK)
+    l1 = float(np.abs(theta[1:]).sum())
+    share = float(np.abs(knot_theta[low]).sum()) / l1 if l1 > 0 else 0.0
+    if share > max_share:
+        out.update(reason=f"the coefficients to zero hold {share:.3g} of the L1 norm", removed_share=share,
+                   seconds=perf_counter() - started)
+        return out
+    candidate = theta.copy()
+    candidate[first:][~kept | low] = 0.0
+    if not polish:
+        rep = kkt_report(problem, candidate, prune, norm_constraint=M)
+        out.update(applied=True, certified=rep["certified"], theta_raw=candidate, kkt=rep)
+    else:
+        support = np.flatnonzero(kept & ~low)
+        for rounds in range(1, REPAIR_MAX_ROUNDS + 1):
+            if support.size > REPAIR_MAX_SUPPORT:
+                out["reason"] = f"support of {support.size} knots too large to polish"
+                break
+            solved, label = problem.solve_on_support(support, M, ladder)
+            if solved is None:
+                out["reason"] = "restricted solve failed"
+                break
+            rep = kkt_report(problem, solved, prune, norm_constraint=M)
+            out.update(applied=True, certified=rep["certified"], theta_raw=solved, kkt=rep, rounds=rounds,
+                       polish_solver=label)
+            if rep["certified"]:
+                break
+            lam = rep["lambda_hat"]
+            new_ratio = np.abs(problem.gradient(solved)[first:]) / lam if lam > 0 else np.zeros(knot_theta.size)
+            outside = np.setdiff1d(np.arange(knot_theta.size), support)
+            missing = outside[new_ratio[outside] > MAX_RATIO]
+            if not missing.size:
+                out["reason"] = "uncertified with nothing to add"
+                break
+            add = missing[np.argsort(-new_ratio[missing])][:REPAIR_ADD_PER_ROUND]
+            support = np.union1d(support, add)
+    final = np.abs(out["theta_raw"][first:]) > prune
+    out.update(removed=int(np.sum(kept & ~final)), removed_l1=float(np.abs(knot_theta[kept & ~final]).sum()),
+               added=int(np.sum(~kept & final)), seconds=perf_counter() - started)
+    out["removed_share"] = out["removed_l1"] / l1 if l1 > 0 else 0.0
+    return out
+
+
 def certified_solve(
     problem: FullDataHALProblem,
     norm_constraint: float,
     ladder: tuple[tuple[str, str, dict[str, Any]], ...] = LADDER,
     prune: float = PRUNE,
+    repair: Optional[str] = None,
 ) -> SupportRefit:
     """Solve ``problem`` at ``norm_constraint`` down ``ladder`` until the optimality check certifies.
 
     The first certified solution wins, else the least violating one. The problem is built once (the
     structured form when available; the dense form only if no configuration returns a usable
-    solution of it). Every configuration tried is recorded in ``attempts``.
+    solution of it). Every configuration tried is recorded in ``attempts``. ``repair`` (proposed, off
+    by default): "zero" or "polish" applies :func:`repair_support` to each uncertified solution before
+    the next configuration is tried.
     """
+    if repair not in (None, "zero", "polish"):
+        raise ValueError(f"repair must be None, 'zero' or 'polish', got {repair!r}")
     started = perf_counter()
     attempts: list[dict[str, Any]] = []
     best = None
@@ -257,6 +383,20 @@ def certified_solve(
                         None if dual is None else float(np.asarray(dual).ravel()[0]) * built.dual_scale)
             if report["certified"]:
                 break
+            if repair is not None:
+                began = perf_counter()
+                # the restricted problem is small: always solved with the tight ladder
+                fixed = repair_support(problem, theta, norm_constraint, polish=repair == "polish", prune=prune)
+                attempts.append(dict(solver=solver, option=f"{label} + repair {repair}", formulation=built.formulation,
+                                     outcome="repaired" if fixed["applied"] else f"not repaired: {fixed['reason']}",
+                                     certified=fixed["certified"], removed=fixed["removed"],
+                                     removed_share=fixed["removed_share"], added=fixed["added"],
+                                     seconds=perf_counter() - began))
+                if fixed["certified"]:
+                    best = ((False, 0, 0.0), solver, f"{label} + repair {repair}", status, fixed["theta_raw"],
+                            fixed["kkt"], built.formulation, problem.objective(fixed["theta_raw"]),
+                            fixed["kkt"]["lambda_hat"])
+                    break
         if best is not None:
             break
     if best is None:
