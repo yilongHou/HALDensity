@@ -33,6 +33,10 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
 
 ### Added
 
+- `docs/dev/cvll-multicollinearity/`: Yilong's implementation note on multicollinearity in the
+  0-order basis, the flat CV log-likelihood it causes, and the conservative adjustment (LaTeX
+  source, figures, and a Markdown rendering with the 0.2.0 k = 0 diagnosis); linked from
+  `OptunaHyperparameterTuner` and `haldensity.core.cv.conservative`.
 - `CVXPYEstimator(objective_normalizer="exact")` for k = 0: the fitting objective normalizes
   exactly (one term per cell between consecutive candidate knots) instead of by the midpoint rule
   on the 199-cell grid. Diagnosis (k = 0, M = 50, five simulated datasets): the midpoint objective
