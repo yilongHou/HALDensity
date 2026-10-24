@@ -4,6 +4,7 @@ import pandas as pd
 import cvxpy as cp
 from typing import Union, Any, Optional, Sequence
 from pydantic import BaseModel
+from haldensity.core.defaults import DEFAULT_BASIS_ORDER
 from haldensity.core.basis.univariate import create_basis_functions
 from haldensity.core.solvers.cvxpy import solve_cvxpy_problem
 
@@ -29,7 +30,7 @@ class BaseTargetLearner:
     def __init__(
         self,
         norm_constraint: int = 20,
-        basis_order: int = 0,
+        basis_order: int = DEFAULT_BASIS_ORDER,
         solver: str = "MOSEK",
         use_secondary_solver: bool = True,
         solver_waterfall: Sequence[str] = ("CLARABEL", "ECOS", "SCS"),
@@ -42,7 +43,7 @@ class BaseTargetLearner:
         norm_constraint : int, optional
             L1-norm constraint for the targeting coefficient(s) (default is 20).
         basis_order : int, optional
-            Order of the basis functions (default is 0).
+            Order of the basis functions (default 2, DEFAULT_BASIS_ORDER).
         solver : str, optional
             Primary CVXPY solver for the targeting M-step.
         use_secondary_solver : bool, optional

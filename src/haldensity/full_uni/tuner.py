@@ -27,7 +27,7 @@ import optuna
 from sklearn.model_selection import KFold
 
 from haldensity.core.cv.conservative import SELECTION_RULES, bisection_search, conservative_threshold
-from haldensity.core.defaults import TUNER_DEFAULTS
+from haldensity.core.defaults import DEFAULT_BASIS_ORDER, TUNER_DEFAULTS
 
 # Import estimators
 from haldensity.full_uni.estimators.cvxpy import CVXPYEstimator
@@ -104,7 +104,9 @@ class OptunaHyperparameterTuner:
             log_frequency: Logging frequency (-1 = no logging)
             n_grid_points: Number of grid points for density evaluation
             silent: Whether to suppress all print statements
-            param_overrides: Optional overrides/limits for hyperparameters. Format per param:
+            param_overrides: Optional overrides/limits for hyperparameters. basis_order is fixed at
+                DEFAULT_BASIS_ORDER = 2 unless given here; {"basis_order": [0, 1, 2]} cross-validates
+                the order as well (before 0.2.0 that was the default). Format per param:
                 - categorical: {"choices": [..]} or a list, or a single fixed value
                 - float/int: {"low": ..., "high": ..., "log": bool (optional), "step": ... (optional)}
                   or a tuple/list (low, high), or a single fixed value
@@ -163,7 +165,10 @@ class OptunaHyperparameterTuner:
         self.n_grid_points = n_grid_points
         self.silent = silent
         self.show_progress = show_progress
-        self.param_overrides: dict[str, Any] = param_overrides or {}
+        self.param_overrides: dict[str, Any] = dict(param_overrides or {})
+        # the order is fixed at the package default (k = 2) unless the overrides ask for CV over it,
+        # e.g. param_overrides={"basis_order": [0, 1, 2]} (Yilong, 2026-10-24)
+        self.param_overrides.setdefault("basis_order", DEFAULT_BASIS_ORDER)
         self.estimator_kwargs: dict[str, Any] = dict(estimator_kwargs or {})
         self.cv_scoring = cv_scoring
         if cv_solver_tolerance not in ("tight", "default"):

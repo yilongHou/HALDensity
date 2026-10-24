@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from typing import Optional
+from haldensity.core.defaults import DEFAULT_BASIS_ORDER
 from haldensity.core.basis.univariate import create_basis_functions
 from haldensity.core.univariate.base_estimator import BaseEstimator
 
@@ -27,7 +28,7 @@ class ProximalNewtonEstimator(BaseEstimator):
         cd_sweeps: int = 2,  # coordinate descent sweeps per Newton step
         line_search_c: float = 1e-4,
         max_line_search_steps: int = 20,
-        basis_order: int = 0,
+        basis_order: int = DEFAULT_BASIS_ORDER,
         log_dir: Optional[str] = None,  # Directory for logging (default None: no logging)
         log_frequency: int = -1,  # Frequency of logging (-1 means no logging)
         non_desc_clip_alpha: bool = True,

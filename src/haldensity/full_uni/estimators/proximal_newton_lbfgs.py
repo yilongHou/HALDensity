@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from typing import Optional, Tuple
 from scipy.special import logsumexp
+from haldensity.core.defaults import DEFAULT_BASIS_ORDER
 from haldensity.core.basis.univariate import create_basis_functions
 from haldensity.core.univariate.base_estimator import BaseEstimator
 
@@ -99,7 +100,7 @@ class ProximalNewtonLBFGSEstimator(BaseEstimator):
         line_search_c: float = 1e-4,
         max_line_search_steps: int = 20,
         lbfgs_memory: int = 5,  # number of (s,y) pairs to keep
-        basis_order: int = 0,
+        basis_order: int = DEFAULT_BASIS_ORDER,
         log_dir: Optional[str] = None,
         log_frequency: int = -1,
         non_desc_clip_alpha: bool = True,

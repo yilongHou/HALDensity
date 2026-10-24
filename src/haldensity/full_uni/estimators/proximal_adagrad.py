@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from scipy.special import logsumexp
 from typing import Optional
+from haldensity.core.defaults import DEFAULT_BASIS_ORDER
 from haldensity.core.basis.univariate import create_basis_functions
 from haldensity.core.univariate.base_estimator import BaseEstimator
 
@@ -34,7 +35,7 @@ class ProximalAdaGradEstimator(BaseEstimator):
         rho: float = 1.0,        # EMA smoothing (1.0 = no smoothing, 0.9 for noisy problems)
         min_hessian: float = 1e-4,  # Minimum diagonal Hessian value for early iterations
         n_grid_points: int = 200,
-        basis_order: int = 0,
+        basis_order: int = DEFAULT_BASIS_ORDER,
         log_dir: Optional[str] = None,
         log_frequency: int = -1,
         safeguard_iterations: int = 5,  # Number of initial iterations with minimum Hessian enforcement

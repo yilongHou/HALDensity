@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from typing import Union, Any
+from haldensity.core.defaults import DEFAULT_BASIS_ORDER
 from haldensity.full_uni.targeting.base import BaseTargetLearner
 from haldensity.core.univariate.functionals import generic_compute_moment_from_density
 
@@ -172,7 +173,7 @@ def moments_targeting_M_step(
     grid_points_hal_selected: Union[list, np.ndarray],
     old_theta: Union[list, np.ndarray],
     norm_constraint: int = 20,
-    basis_order: int = 0
+    basis_order: int = DEFAULT_BASIS_ORDER
 ) -> dict:
     """
     Convenience function that wraps the MomentsTargetLearner for backward compatibility.
@@ -191,7 +192,7 @@ def moments_estimand_variance(
     uncensored_data: pd.DataFrame,
     x_moment: int,
     norm_constraint: int = 20,
-    basis_order: int = 0
+    basis_order: int = DEFAULT_BASIS_ORDER
 ) -> np.ndarray:
     """
     Convenience function that wraps the MomentsTargetLearner for estimating variance.
@@ -207,7 +208,7 @@ def moments_estimand_variance(
     norm_constraint : int, optional
         L1-norm constraint (default is 20).
     basis_order : int, optional
-        Order of the basis functions (default is 0).
+        Order of the basis functions (default 2, DEFAULT_BASIS_ORDER).
         
     Returns
     -------

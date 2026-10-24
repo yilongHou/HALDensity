@@ -11,7 +11,7 @@ Status: reference list, 2026-10-24. Each item says what was decided, when, and w
 | A trial counts | Only if every fold fit qualifies; if no trial gets a finite score, raise an error (never return an arbitrary M) | A silent all-folds failure returned the first trial's M |
 | CV solver | The estimator's own solver defaults with the fallback ladder (§3), **at the default tolerance** (`OptunaHyperparameterTuner(cv_solver_tolerance="default")`) | CV only compares fitted values; tight tolerance in 250 solves costs time for no benefit (decided 2026-10-24) |
 | Solver statuses | `optimal_inaccurate` accepted and counted; L1 overshoot recorded, not gated | As in HALDensity |
-| Degree k | Fixed when a study checks the theorem; **chosen by CV jointly with M** when HAL is compared with other estimators | Decided 2026-10-23 |
+| Degree k | **Package default: fixed k = 2** (decided 2026-10-24; `DEFAULT_BASIS_ORDER`); CV over the order on request (`param_overrides={"basis_order": [0, 1, 2]}`, the default before 0.2.0). Experiments: fixed when a study checks the theorem; chosen by CV jointly with M when HAL is compared with other estimators (decided 2026-10-23) | At n = 320 the package's joint CV over {0, 1, 2} was never better than fixed k = 2 (KL of the joint CV relative to fixed k = 2: 0.96, 1.02, 1.16, 1.34 on the jump, slope-kink, curvature-kink and smooth truths), and an order higher than the truth's costs little |
 | **Conservative adjustment** | `"auto"` (default): **on only when the CV-best order is k = 0**; margin **5% of the CV log-likelihood SD** (Yilong's rule), bisection search. Off for k ≥ 1 | For k = 0 the CV curve can be flat (spikes, Yilong's CVLL note: [cvll-multicollinearity/](cvll-multicollinearity/README.md)). For k ≥ 1 it oversmoothed: L2 worse in 11 of 16 test datasets |
 | One-SE rule | **Not used** | About 9× wider than the 5% margin; HAL's CV already picks M below the truth's norm |
 | CV safeguard for k ≥ 1 | **None** (decided 2026-10-24): the paired-difference rule is not adopted | The k = 1 CV curves decline gently with no pathological fits; a continuous fit cannot hide spikes; plain CV at k = 1–3 beat both sieves in the experiments. Reopen only if the paper rerun's imbalance diagnostics flag a problem. The k = 0 conservative adjustment may also go (session 69's check pending) |
@@ -83,6 +83,5 @@ Status: reference list, 2026-10-24. Each item says what was decided, when, and w
 - Extending the step-height rewrite to k ≥ 2 (not needed for now: the old midpoint rule at k ≥ 2 has the lean data term).
 - Whether the paper's theory-checking runs use every knot (experiment side).
 - Accurate normalizer for the censored-data estimators (RC project handoff).
-- A package default for the order k: fixed k = 2 or CV over {0, 1, 2} (theory suggests k = 2; Phase B and the paper-version simulation decide).
 - Undersmoothing for pointwise intervals (c ≈ 2) vs the CV fit: decided at the paper-version rerun; Phase B's bias/sd at the kink for k = 2, 3 informs it.
 - Current-status and interval-censored notebook destinations; examples triage and tutorials; release version, merge and branch clean-up.

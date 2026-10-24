@@ -75,6 +75,14 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   Gaussian mixture, n = 400 and 1,280, k = 1 and 2): basis 1,121-1,257 -> 5-33 functions at
   n = 1,280; mean SE / Monte Carlo sd 1.11-2.76 -> 0.80-1.25; coverage of the truth 85-100%
   (median 100%) -> 83-99% (median 94%).
+- **Default order k = 2** (`haldensity.core.defaults.DEFAULT_BASIS_ORDER`; Yilong, 2026-10-24) for
+  every full-data univariate estimator and the full-data targeting functions; the tuner fixes the
+  order at 2 unless asked to cross-validate it (`param_overrides={"basis_order": [0, 1, 2]}`, the
+  default before 0.2.0). **Default results change.** Why: at n = 320 the package's joint CV over
+  {0, 1, 2} was never better than fixed k = 2 (KL of the joint CV relative to fixed k = 2: 0.96,
+  1.02, 1.16 and 1.34 on the jump, slope-kink, curvature-kink and smooth truths), and an order
+  higher than the truth's costs little. The censored-data and multivariate estimators keep their
+  own defaults.
 - **No SE when basis cleaning fails** (Yilong, 2026-10-24): if the final fit does not pass the
   optimality check (or a separate cleaning refit does not), `estimate_covariance_beta` returns an
   all-NaN covariance and `density_confidence_interval` the point estimate with NaN `se`, `lower` and

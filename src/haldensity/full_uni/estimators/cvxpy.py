@@ -3,6 +3,7 @@ import pandas as pd
 import cvxpy as cp
 import warnings
 from typing import Optional, Union
+from haldensity.core.defaults import DEFAULT_BASIS_ORDER
 from haldensity.core.basis.univariate import create_basis_functions
 from haldensity.core.solvers.cvxpy import (
     DEFAULT_SOLVER_THREADS,
@@ -52,7 +53,7 @@ class CVXPYEstimator(BaseEstimator):
         tol: float = 1e-4,
         norm_constraint: float = 3.0,
         n_grid_points: int = 200,
-        basis_order: int = 0,
+        basis_order: int = DEFAULT_BASIS_ORDER,
         solver: str = "MOSEK",
         log_dir: Optional[str] = None,
         log_frequency: int = 10,

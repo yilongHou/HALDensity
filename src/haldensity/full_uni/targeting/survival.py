@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from typing import Union, Any, Tuple
+from haldensity.core.defaults import DEFAULT_BASIS_ORDER
 from haldensity.full_uni.targeting.base import BaseTargetLearner
 from haldensity.full_uni.targeting.survival_basis import create_targeting_basis_functions
 from haldensity.core.basis.univariate import create_basis_functions
@@ -195,7 +196,7 @@ def survival_targeting_M_step(
     grid_points_hal_selected: Union[list, np.ndarray],
     old_theta: Union[list, np.ndarray],
     norm_constraint: int = 20,
-    basis_order: int = 0
+    basis_order: int = DEFAULT_BASIS_ORDER
 ) -> dict:
     """
     Convenience function that wraps the SurvivalTargetLearner for backward compatibility.
@@ -213,7 +214,7 @@ def survival_estimand_variance(
     uncensored_data: pd.DataFrame,
     targeting_points: Union[list, np.ndarray],
     norm_constraint: int = 20,
-    basis_order: int = 0
+    basis_order: int = DEFAULT_BASIS_ORDER
 ) -> np.ndarray:
     """
     Convenience function that wraps the SurvivalTargetLearner for estimating variance.
@@ -229,7 +230,7 @@ def survival_estimand_variance(
     norm_constraint : int, optional
         L1-norm constraint (default is 20).
     basis_order : int, optional
-        Order of the basis functions (default is 0).
+        Order of the basis functions (default 2, DEFAULT_BASIS_ORDER).
         
     Returns
     -------

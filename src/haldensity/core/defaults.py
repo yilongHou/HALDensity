@@ -14,6 +14,13 @@ import pandas as pd
 from pydantic import BaseModel, ConfigDict
 
 
+# Package default basis order of the full-data univariate HAL-MLE (Yilong, 2026-10-24): fixed k = 2,
+# CV over the order on request. At n = 320 the package's joint CV over {0, 1, 2} was never better than
+# fixed k = 2 (KL of the joint CV relative to fixed k = 2: 0.96, 1.02, 1.16 and 1.34 on the jump,
+# slope-kink, curvature-kink and smooth truths), and an order higher than the truth's costs little.
+DEFAULT_BASIS_ORDER = 2
+
+
 class EMDefaults(BaseModel):
     """Default parameters for EM algorithm.
 

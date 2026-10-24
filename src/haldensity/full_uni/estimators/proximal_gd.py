@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from typing import Optional
+from haldensity.core.defaults import DEFAULT_BASIS_ORDER
 from haldensity.core.basis.univariate import create_basis_functions
 from haldensity.core.univariate.base_estimator import BaseEstimator
 
@@ -24,7 +25,7 @@ class ProximalGDEstimator(BaseEstimator):
         n_iterations: int = 8000,
         tol: float = 1e-6,
         n_grid_points: int = 200,
-        basis_order: int = 0,
+        basis_order: int = DEFAULT_BASIS_ORDER,
         log_dir: Optional[str] = None,
         log_frequency: int = -1,
         normalizer: str = "gauss_legendre",

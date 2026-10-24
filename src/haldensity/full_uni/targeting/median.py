@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from typing import Union, Any, Tuple
+from haldensity.core.defaults import DEFAULT_BASIS_ORDER
 from haldensity.full_uni.targeting.base import BaseTargetLearner
 from haldensity.core.univariate.base_estimator import BaseEstimator
 from haldensity.core.univariate.functionals import generic_compute_median_from_density
@@ -222,7 +223,7 @@ def median_targeting_M_step(
     grid_points_hal_selected: Union[list, np.ndarray],
     old_theta: Union[list, np.ndarray],
     norm_constraint: int = 20,
-    basis_order: int = 0
+    basis_order: int = DEFAULT_BASIS_ORDER
 ) -> dict:
     """
     Convenience function that wraps the MedianTargetLearner for backward compatibility.
@@ -241,7 +242,7 @@ def median_estimand_variance(
     targeted_fit: dict[str, Any],
     uncensored_data: pd.DataFrame,
     norm_constraint: int = 20,
-    basis_order: int = 0
+    basis_order: int = DEFAULT_BASIS_ORDER
 ) -> np.ndarray:
     """
     Convenience function that wraps the MedianTargetLearner for estimating variance.
@@ -255,7 +256,7 @@ def median_estimand_variance(
     norm_constraint : int, optional
         L1-norm constraint (default is 20).
     basis_order : int, optional
-        Order of the basis functions (default is 0).
+        Order of the basis functions (default 2, DEFAULT_BASIS_ORDER).
         
     Returns
     -------
