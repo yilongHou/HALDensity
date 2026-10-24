@@ -51,6 +51,13 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
 
 ### Changed (behaviour)
 
+- Full-data estimators evaluate and report the density with an accurate normalizer: log Z by
+  cell-wise Gauss-Legendre with breakpoints at the knots with nonzero coefficients (32 nodes per
+  cell, doubled until the change is below 1e-12; exact for k = 0), in float64. The midpoint rule
+  on the fitting grid underestimated Z for spiky fits (0.175 nats at k = 1, M = 1e5, n = 1280).
+  The fitting objective is unchanged. Old behaviour: `normalizer="midpoint"`. New:
+  `estimator.log_normalizer()`, `estimator.get_log_density_at_points()`. Censored-data estimators
+  keep the normalizer frozen on their own fitting grid.
 - Default CVXPY solver: MOSEK, then CLARABEL, ECOS, SCS (was ECOS only); a solve is accepted
   only with status optimal or optimal_inaccurate. Restore ECOS-only with
   `solver="ECOS", use_secondary_solver=False`.

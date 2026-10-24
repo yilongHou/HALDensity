@@ -6,6 +6,7 @@ import os
 from scipy.interpolate import interp1d
 from pydantic import BaseModel
 from haldensity.core.basis.univariate import create_basis_functions
+from haldensity.core.univariate.normalizer import LogNormalizer, log_normalizer, log_unnormalized_density
 
 EXPLOSION_THRESHOLD = 1e5  # Threshold for detecting numerical explosion in optimization
 LOGGER = logging.getLogger(__name__)
@@ -23,6 +24,9 @@ class CommonEstimatorResults(BaseModel):
     hal_coeffs: list[float]
 
 
+NORMALIZERS = ("gauss_legendre", "midpoint")
+
+
 class BaseEstimator:
     """Lightweight base providing logging, density utilities, and common result helpers."""
     
@@ -34,6 +38,7 @@ class BaseEstimator:
         basis_order: int = 0,
         log_dir: Optional[str] = None,
         log_frequency: int = -1,
+        normalizer: str = "gauss_legendre",
         **kwargs  # Allow subclasses to pass additional parameters
     ):
         """
@@ -46,6 +51,11 @@ class BaseEstimator:
             basis_order: Order of the truncated power basis
             log_dir: Directory for logging
             log_frequency: Frequency of logging (-1 means no logging)
+            normalizer: How get_density_at_points normalizes the fitted density.
+                "gauss_legendre" (default): accurate log Z, cell-wise Gauss-Legendre with
+                breakpoints at the knots (haldensity.core.univariate.normalizer).
+                "midpoint": the pre-0.2.0 midpoint rule on the fitting grid refined by the
+                selected knots. The fitting objective is the same either way.
             **kwargs: Additional parameters for subclasses
         """
         self.lam = lam
@@ -53,6 +63,9 @@ class BaseEstimator:
         self.tol = tol
         self.basis_order = basis_order
         self.is_fitted = False
+        if normalizer not in NORMALIZERS:
+            raise ValueError(f"normalizer must be one of {NORMALIZERS}, got {normalizer!r}")
+        self.normalizer = normalizer
 
         self.explosion_threshold = EXPLOSION_THRESHOLD
 
@@ -204,7 +217,10 @@ class BaseEstimator:
         """
         if not self.is_fitted or self.theta_hat is None or self._grid_points_hal is None or self.grid_midpoints is None or self.delta_j is None:
             raise ValueError("Estimator must be fitted before getting density. Call fit() first.")
-        
+
+        if getattr(self, "normalizer", "midpoint") != "midpoint":
+            return np.exp(np.clip(self.get_log_density_at_points(points), -745.0, 709.0))
+
         return BaseEstimator.calculate_density_at_points(
             points=points,
             theta_hat=self.theta_hat,
@@ -214,6 +230,29 @@ class BaseEstimator:
             norm_delta_j=self.delta_j
         )
     
+    def log_normalizer(self) -> LogNormalizer:
+        """Accurate log normalizer of the fitted density (cached until theta changes)."""
+        if not self.is_fitted or self.theta_hat is None or self._grid_points_hal is None:
+            raise ValueError("Estimator must be fitted before computing the normalizer. Call fit() first.")
+        theta = np.asarray(self.theta_hat, dtype=float).ravel()
+        knots = np.asarray(self._grid_points_hal, dtype=float).ravel()
+        key = (theta.tobytes(), knots.tobytes(), int(self.basis_order))
+        cached = getattr(self, "_log_normalizer_cache", None)
+        if cached is None or cached[0] != key:
+            cached = (key, log_normalizer(theta, knots, self.basis_order))
+            self._log_normalizer_cache = cached
+        return cached[1]
+
+    def get_log_density_at_points(self, points: np.ndarray) -> np.ndarray:
+        """Log of the fitted density at ``points``, evaluated exactly and normalized per ``normalizer``."""
+        if getattr(self, "normalizer", "midpoint") == "midpoint":
+            with np.errstate(divide="ignore"):
+                return np.log(self.get_density_at_points(points))
+        if not self.is_fitted or self.theta_hat is None or self._grid_points_hal is None:
+            raise ValueError("Estimator must be fitted before getting density. Call fit() first.")
+        log_f = log_unnormalized_density(points, self.theta_hat, self._grid_points_hal, self.basis_order)
+        return log_f - self.log_normalizer().log_z
+
     @staticmethod
     def calculate_density_at_points(
         points: np.ndarray,

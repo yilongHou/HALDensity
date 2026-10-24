@@ -108,7 +108,8 @@ class ProximalNewtonLBFGSEstimator(BaseEstimator):
         lbfgs_update_tolerance: float = 1e-12,  # Tolerance for L-BFGS updates
         lbfgs_gamma_clip_range: Tuple[float, float] = (1e-6, 1e3),  # Clipping range for gamma_k
         line_search_beta: float = 0.5,  # Step size reduction factor for line search
-        non_descent_step_size: float = 0.1  # Fallback step size for non-descent directions
+        non_descent_step_size: float = 0.1,  # Fallback step size for non-descent directions
+        normalizer: str = "gauss_legendre",
     ):
         """
         Initialize Proximal Newton L-BFGS estimator with diagonal Hessian approximation.
@@ -201,6 +202,7 @@ class ProximalNewtonLBFGSEstimator(BaseEstimator):
         """
         # Initialize base class
         super().__init__(
+            normalizer=normalizer,
             lam=lam,
             n_iterations=n_iterations,
             tol=tol,

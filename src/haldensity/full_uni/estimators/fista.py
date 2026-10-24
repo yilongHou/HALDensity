@@ -26,7 +26,8 @@ class FISTAEstimator(BaseEstimator):
         n_grid_points: int = 200,
         basis_order: int = 0,
         log_dir: Optional[str] = None,
-        log_frequency: int = -1
+        log_frequency: int = -1,
+        normalizer: str = "gauss_legendre",
     ):
         """
         Initialize FISTA estimator.
@@ -43,6 +44,7 @@ class FISTAEstimator(BaseEstimator):
         """
         # Initialize base class
         super().__init__(
+            normalizer=normalizer,
             lam=lam,
             n_iterations=n_iterations,
             tol=tol,

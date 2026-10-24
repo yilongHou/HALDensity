@@ -34,10 +34,12 @@ class ProximalNewtonEstimator(BaseEstimator):
         hessian_regularization: float = 1e-8,  # Regularization added to Hessian diagonal
         cd_skip_tolerance: float = 1e-8,  # Skip coordinate if diagonal element too small
         line_search_beta: float = 0.5,  # Step size reduction factor for line search
-        non_descent_step_size: float = 0.1  # Fallback step size for non-descent directions
+        non_descent_step_size: float = 0.1,  # Fallback step size for non-descent directions
+        normalizer: str = "gauss_legendre",
     ):
         """Initialize Proximal Newton estimator with coordinate descent subproblem."""
         super().__init__(
+            normalizer=normalizer,
             lam=lam,
             n_iterations=n_iterations,
             tol=tol,

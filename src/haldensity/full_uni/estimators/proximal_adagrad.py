@@ -39,7 +39,8 @@ class ProximalAdaGradEstimator(BaseEstimator):
         log_frequency: int = -1,
         safeguard_iterations: int = 5,  # Number of initial iterations with minimum Hessian enforcement
         min_intercept_hessian: float = 1.0,  # Minimum Hessian value for intercept term
-        relative_objective_tolerance: float = 1e-5  # Tolerance for relative objective change
+        relative_objective_tolerance: float = 1e-5,  # Tolerance for relative objective change
+        normalizer: str = "gauss_legendre",
     ):
         """
         Initialize Proximal AdaGrad estimator.
@@ -61,6 +62,7 @@ class ProximalAdaGradEstimator(BaseEstimator):
             relative_objective_tolerance: Tolerance for relative objective change
         """
         super().__init__(
+            normalizer=normalizer,
             lam=lam,
             n_iterations=n_iterations,
             tol=tol,

@@ -82,6 +82,7 @@ class ProximalNewtonLBFGSFullEstimator(BaseEstimator):
         non_descent_step_size: float = 0.1,  # Fallback step size for non-descent directions
         lbfgs_update_tolerance: float = 1e-12,  # Tolerance for L-BFGS updates
         lbfgs_gamma_clip_range: Tuple[float, float] = (1e-6, 1e6),  # Clipping range for gamma_k
+        normalizer: str = "gauss_legendre",
     ):
         """
         Initialize Proximal Newton L-BFGS Full estimator.
@@ -177,6 +178,7 @@ class ProximalNewtonLBFGSFullEstimator(BaseEstimator):
         """
         # Initialize base class
         super().__init__(
+            normalizer=normalizer,
             lam=lam,
             n_iterations=n_iterations,
             tol=tol,

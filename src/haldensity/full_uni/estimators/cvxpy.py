@@ -30,6 +30,7 @@ class CVXPYEstimator(BaseEstimator):
         log_frequency: int = 10,
         use_secondary_solver: bool = True,
         solver_waterfall: list[str] = ["MOSEK", "CLARABEL", "ECOS", "SCS"],
+        normalizer: str = "gauss_legendre",
     ):
         """
         Initialize CVXPY estimator.
@@ -41,6 +42,7 @@ class CVXPYEstimator(BaseEstimator):
             solver: CVXPY solver to use (default: "MOSEK")
         """
         super().__init__(
+            normalizer=normalizer,
             tol=tol,
             basis_order=basis_order,
             log_dir=log_dir or "./local/logs/cvxpy.log",
