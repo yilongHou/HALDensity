@@ -14,6 +14,10 @@
   data-type package. `core` never imports a data-type package.
 - **Behaviour changes** (anything that can move a number) say what changes, come with a
   before/after check on a few fits, and are recorded in `CHANGELOG.md`.
+- **Agreed defaults and rules** (CV score, conservative adjustment, solver ladder and tolerances,
+  KKT certification, normalizers, variance estimation, package rules, pending items) are listed in
+  [`docs/dev/DECISIONS.md`](docs/dev/DECISIONS.md). Update it in the same commit whenever a default
+  or rule changes.
 
 ## Layout
 
