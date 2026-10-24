@@ -37,6 +37,7 @@ def test_old_path_reexports_public_names_with_a_deprecation_warning(old_path):
             assert hasattr(module, name), f"{old_path}.{name}"
 
 
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
 def test_reexports_are_the_new_objects():
     from haldensity.censoring import RightCensoredInitEstimator as old_rc
     from haldensity.estimation import CVXPYEstimator as old_cvx

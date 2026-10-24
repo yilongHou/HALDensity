@@ -20,17 +20,10 @@ import os
 from typing import Optional, Tuple, Any
 from datetime import datetime
 from scipy.interpolate import interp1d
-import warnings
-warnings.filterwarnings('ignore')
 from tqdm import tqdm
 
 import optuna
 from sklearn.model_selection import KFold
-from sklearn.exceptions import ConvergenceWarning
-warnings.filterwarnings('ignore', category=ConvergenceWarning)
-
-# Set random seed for reproducibility
-optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 # Import estimators
 from haldensity.full_uni.estimators.cvxpy import CVXPYEstimator
@@ -501,44 +494,50 @@ class OptunaHyperparameterTuner:
         self._fold_errors = []
         self._trial_estimator_params = {}
 
-        # Create Optuna study
-        direction = "minimize"  # Always minimize (we negate SLL if needed)
-        study_name = f"{self.estimator_name}_{self.metric}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        # Keep Optuna's per-trial INFO lines quiet during the search; restore the caller's level after.
+        previous_verbosity = optuna.logging.get_verbosity()
+        optuna.logging.set_verbosity(optuna.logging.WARNING)
+        try:
+            # Create Optuna study
+            direction = "minimize"  # Always minimize (we negate SLL if needed)
+            study_name = f"{self.estimator_name}_{self.metric}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
-        self.study = optuna.create_study(
-            direction=direction,
-            study_name=study_name,
-            sampler=optuna.samplers.TPESampler(seed=self.random_state)
-        )
+            self.study = optuna.create_study(
+                direction=direction,
+                study_name=study_name,
+                sampler=optuna.samplers.TPESampler(seed=self.random_state)
+            )
         
-        # Run optimization with tqdm progress bar
-        if self.show_progress and n_trials > 1:
-            # Use tqdm progress bar for trials (only if more than 1 trial)
-            with tqdm(total=n_trials, desc=f"Optimizing {self.estimator_name}", 
-                     unit="trial", dynamic_ncols=True) as pbar:
-                def callback(study, trial):
-                    pbar.update(1)
-                    # Update progress bar description with current best value
-                    if study.best_value is not None:
-                        best_display = f"{-study.best_value:.4f}" if self.metric == "sll" else f"{study.best_value:.4f}"
-                        pbar.set_postfix_str(f"Best {self.metric.upper()}: {best_display}")
+            # Run optimization with tqdm progress bar
+            if self.show_progress and n_trials > 1:
+                # Use tqdm progress bar for trials (only if more than 1 trial)
+                with tqdm(total=n_trials, desc=f"Optimizing {self.estimator_name}", 
+                         unit="trial", dynamic_ncols=True) as pbar:
+                    def callback(study, trial):
+                        pbar.update(1)
+                        # Update progress bar description with current best value
+                        if study.best_value is not None:
+                            best_display = f"{-study.best_value:.4f}" if self.metric == "sll" else f"{study.best_value:.4f}"
+                            pbar.set_postfix_str(f"Best {self.metric.upper()}: {best_display}")
                 
+                    self.study.optimize(
+                        self._objective,
+                        n_trials=n_trials,
+                        timeout=timeout,
+                        callbacks=[callback],
+                        show_progress_bar=False  # Disable optuna's progress bar
+                    )
+            else:
+                # Run without progress bar
                 self.study.optimize(
                     self._objective,
                     n_trials=n_trials,
                     timeout=timeout,
-                    callbacks=[callback],
-                    show_progress_bar=False  # Disable optuna's progress bar
+                    show_progress_bar=False
                 )
-        else:
-            # Run without progress bar
-            self.study.optimize(
-                self._objective,
-                n_trials=n_trials,
-                timeout=timeout,
-                show_progress_bar=False
-            )
-        
+        finally:
+            optuna.logging.set_verbosity(previous_verbosity)
+
         # A trial whose every fold failed scores +inf; if no trial is finite the
         # "best" parameters would just be the first trial's, so fail loudly instead.
         if not any(t.value is not None and np.isfinite(t.value) for t in self.study.trials):
