@@ -1,4 +1,7 @@
-"""Right-censored data: IPCW-HAL-MLE, EM, observed-data L1-MLE, tuners and AIPW (targeting in ``rc.targeting``)."""
+"""Right-censored data: IPCW-HAL-MLE, EM, observed-data L1-MLE, tuners, point-estimator pipelines and AIPW.
+
+Targeting lives in ``haldensity.rc.targeting``.
+"""
 
 from haldensity.rc.km import KaplanMeier
 from haldensity.rc.weights import compute_ipcw_weights
@@ -31,9 +34,14 @@ from haldensity.rc.aipw import (
     right_censored_survival_aipw,
     right_censored_survival_aipw_estimand_variance,
 )
-from haldensity.rc.comparison import (
-    fit_right_censored_cv_ipcw_l1mle_plugin,
-    fit_right_censored_cv_ipcw_l1mle_undersmoothed_plugin,
+from haldensity.rc.pipelines import (
+    METHODS,
+    RightCensoredPointEstimate,
+    fit_cvl1mle,
+    fit_ipcw_hal,
+    fit_l1mle_m1,
+    fit_right_censored,
+    fit_undersmoothed,
 )
 
 __all__ = [
@@ -62,6 +70,11 @@ __all__ = [
     "RightCensoredSurvivalAIPWLearner",
     "right_censored_survival_aipw",
     "right_censored_survival_aipw_estimand_variance",
-    "fit_right_censored_cv_ipcw_l1mle_plugin",
-    "fit_right_censored_cv_ipcw_l1mle_undersmoothed_plugin",
+    "METHODS",
+    "RightCensoredPointEstimate",
+    "fit_cvl1mle",
+    "fit_ipcw_hal",
+    "fit_l1mle_m1",
+    "fit_right_censored",
+    "fit_undersmoothed",
 ]
