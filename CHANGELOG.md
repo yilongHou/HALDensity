@@ -52,6 +52,17 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   diagnostics: `objective_log_normalizer()`, `objective_value_`; `get_results()` records the
   objective normalizer, `max_knots` and the number of candidate knots; basis cleaning rebuilds the
   same problem.
+- Knot-aware objective for k = 0 and 1 solved in a structured (sparse) form
+  (`haldensity.core.univariate.objective.structured_problem`), shared by the fit, CV and basis
+  cleaning: k = 0 as a total-variation problem over the cell levels, k = 1 over the values at the
+  knots and one slope per knot interval; O(n + cells) nonzeros instead of the n x m basis. Same
+  optimum as the dense form (n = 200-2,000, k = 0, 1, M reasonable and 100x, K = 60, 250: objective
+  within 3.3e-6 relative, the structured solution never worse by more than 1.6e-9; log-density on
+  mass-carrying cells within 3.4e-3; cell masses within 8.5e-5 in total variation) and 1-1,900
+  times faster. Scaled for the solvers (objective / n; k = 1 slopes / max(1, M)). If no solver
+  reaches status "optimal" on it, the fit uses the dense form; `knot_aware_formulation_used_` and
+  `get_results()["knot_aware_formulation_used"]` record which. The dense form stays available as
+  `CVXPYEstimator.knot_aware_formulation = "dense"`. Defaults unchanged.
 - Basis cleaning before the delta-method SE, on by default (`haldensity.core.univariate.support`):
   the full-data problem is re-solved at the fit's bound with tight tolerances (CLARABEL
   1e-12/1e-10, ECOS 1e-12/1e-10, SCS 1e-9), pruned at 1e-4 and certified by the optimality

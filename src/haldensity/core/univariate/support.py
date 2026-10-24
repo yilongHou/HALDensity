@@ -8,9 +8,11 @@ solution's (e.g. 186-717 functions against ~8 at n = 1280), which inflates the
 SE (2.4-14 times the Monte Carlo sd in that study).
 
 What. :func:`refit_support` rebuilds the full-data problem of
-``CVXPYEstimator`` exactly (summed negative log-likelihood with its midpoint
-normalizer on ``n_grid_points``, knots at the unique data values,
-``||theta[1:]||_1 <= M``), re-solves it at the selected M with tight
+``CVXPYEstimator`` exactly (summed negative log-likelihood with the fit's
+objective normalizer, midpoint or knot-aware, on ``n_grid_points``; the fit's
+candidate knots; ``||theta[1:]||_1 <= M``; for knot-aware with k <= 1 the same
+structured form as the fit, from :mod:`haldensity.core.univariate.objective`),
+re-solves it at the selected M with tight
 tolerances (CLARABEL 1e-12, 1e-10; ECOS 1e-12, 1e-10; SCS 1e-9; first
 certified solution wins, else the least violating), prunes at 1e-4 and
 certifies the result with :func:`kkt_report`:
@@ -41,10 +43,15 @@ from typing import Any, Optional
 import cvxpy as cp
 import numpy as np
 import pandas as pd
-from scipy.special import logsumexp
 
 from haldensity.core.basis.univariate import create_basis_functions
-from haldensity.core.univariate.objective import candidate_knots, normalizer_terms
+from haldensity.core.univariate.objective import (
+    STRUCTURED_ORDERS,
+    candidate_knots,
+    normalizer_terms,
+    objective_gradient,
+    structured_problem,
+)
 
 LADDER: tuple[tuple[str, str, dict[str, Any]], ...] = (
     ("CLARABEL", "tol 1e-12", dict(tol_gap_abs=1e-12, tol_gap_rel=1e-12, tol_feas=1e-12, max_iter=400)),
@@ -62,45 +69,42 @@ _OK_STATUSES = ("optimal", "optimal_inaccurate")
 
 
 class FullDataHALProblem:
-    """``CVXPYEstimator``'s optimization problem for one sample (same knots and normalizer cells)."""
+    """``CVXPYEstimator``'s optimization problem for one sample (same knots, cells and formulation)."""
 
     def __init__(self, data: pd.DataFrame, basis_order: int, n_grid_points: int = 200,
                  objective_normalizer: str = "midpoint", max_knots: Optional[int] = None):
-        x = np.asarray(data["W1"].dropna(), dtype=float)
+        self.x = np.asarray(data["W1"].dropna(), dtype=float)
         self.basis_order = int(basis_order)
-        self.n = int(x.size)
-        self.knots = candidate_knots(x, max_knots)
-        self.data_basis = create_basis_functions(pd.DataFrame({"W1": x}), self.knots, order=self.basis_order)[0]
-        terms = normalizer_terms(x, self.knots, self.basis_order, n_grid_points, objective_normalizer)
-        if terms.basis is not None:
-            self.grid_basis = terms.basis
-        else:
-            rows = [self.data_basis[terms.data_rows]]
-            if terms.leading_intercept_cell:
-                intercept_only = np.zeros((1, self.data_basis.shape[1]), dtype=self.data_basis.dtype)
-                intercept_only[0, 0] = 1.0
-                rows.insert(0, intercept_only)
-            self.grid_basis = np.vstack(rows)
-        self.log_delta = terms.log_widths
+        self.n = int(self.x.size)
+        self.n_grid_points = int(n_grid_points)
+        self.objective_normalizer = objective_normalizer
+        self.knots = candidate_knots(self.x, max_knots)
+        self.structured = objective_normalizer == "knot_aware" and self.basis_order in STRUCTURED_ORDERS
+        self.terms = normalizer_terms(self.x, self.knots, self.basis_order, self.n_grid_points, objective_normalizer,
+                                      build_basis=False)
 
     def solve(self, norm_constraint: float, solver: str, options: dict[str, Any]) -> tuple[Optional[np.ndarray], str]:
-        theta = cp.Variable(self.data_basis.shape[1])
-        loss = -cp.sum(self.data_basis @ theta) + self.n * cp.log_sum_exp(self.log_delta + self.grid_basis @ theta)
-        problem = cp.Problem(cp.Minimize(loss), [cp.norm1(theta[1:]) <= float(norm_constraint)])
+        if self.structured:
+            sparse = structured_problem(self.x, self.knots, self.basis_order, self.n_grid_points, norm_constraint)
+            problem, value_of = sparse.problem, sparse.theta
+        else:
+            data_basis = create_basis_functions(pd.DataFrame({"W1": self.x}), self.knots, order=self.basis_order)[0]
+            grid_basis = normalizer_terms(self.x, self.knots, self.basis_order, self.n_grid_points,
+                                          self.objective_normalizer).basis
+            theta = cp.Variable(data_basis.shape[1])
+            loss = -cp.sum(data_basis @ theta) + self.n * cp.log_sum_exp(self.terms.log_widths + grid_basis @ theta)
+            problem = cp.Problem(cp.Minimize(loss), [cp.norm1(theta[1:]) <= float(norm_constraint)])
+            value_of = lambda: None if theta.value is None else theta.value  # noqa: E731
         with warnings.catch_warnings():
             # the ladder records each status and the optimality check decides; CVXPY's notice is noise here
             warnings.filterwarnings("ignore", message="Solution may be inaccurate", category=UserWarning)
             problem.solve(solver=solver, **options)
-        value = None if theta.value is None else np.asarray(theta.value, dtype=float).copy()
-        return value, str(problem.status)
+        value = value_of()
+        return (None if value is None else np.asarray(value, dtype=float).copy()), str(problem.status)
 
     def gradient(self, theta: np.ndarray) -> np.ndarray:
-        """Gradient of the summed negative log-likelihood (midpoint normalizer) at ``theta``."""
-        data_basis = self.data_basis.astype(float)
-        grid_basis = self.grid_basis.astype(float)
-        z = self.log_delta + grid_basis @ theta
-        weights = np.exp(z - logsumexp(z))
-        return -data_basis.sum(axis=0) + self.n * (weights @ grid_basis)
+        """Gradient of the summed negative log-likelihood (the objective's own normalizer) at ``theta``."""
+        return objective_gradient(theta, self.x, self.knots, self.basis_order, self.terms)
 
 
 def kkt_report(problem: FullDataHALProblem, theta: np.ndarray, prune: float = PRUNE,
