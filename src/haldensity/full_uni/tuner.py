@@ -80,7 +80,7 @@ class OptunaHyperparameterTuner:
         estimator_kwargs: Optional[dict[str, Any]] = None,
         cv_scoring: str = "exact",
         cv_solver_tolerance: str = "default",
-        use_conservative_adjustment: Union[bool, str] = "auto",
+        use_conservative_adjustment: Union[bool, str] = False,
         conservative_selection_rule: str = TUNER_DEFAULTS.conservative_selection_rule,
         conservative_k_percent: float = TUNER_DEFAULTS.conservative_k_percent,
         conservative_se_multiplier: float = TUNER_DEFAULTS.conservative_se_multiplier,
@@ -131,9 +131,13 @@ class OptunaHyperparameterTuner:
             use_conservative_adjustment: After the CV search, move to the smallest bound
                 (norm_constraint) whose mean CV log-likelihood is at least the threshold below the
                 best (haldensity.core.cv.conservative; bracketing then bisection in log M), as the
-                censored-data tuners do. "auto" (default, interim): only when the CV-best basis
-                order is 0, where nearly collinear indicator bases make the CV curve flat; True /
-                False force it on / off. Applies to estimators tuned by norm_constraint
+                censored-data tuners do. False (default; Yilong, 2026-10-24): off at every order,
+                the fit is at the CV-best bound. True: on; "auto": only when the CV-best basis order
+                is 0 (the interim default earlier in 0.2.0). Why off: at k = 0 with the exact
+                objective (four truths, n = 320 and 1,280, 50 replicates) the CV-best fit's KL was
+                0.82-0.99 times the adjusted fit's, the adjustment doubled the smooth truth's
+                boundary bias, and the flat CV curve it guards against appeared in 0 of 800 fits;
+                at k >= 1 it oversmoothed. Applies to estimators tuned by norm_constraint
                 (CVXPYEstimator) with metric "sll"; otherwise it is skipped and `adjustment_note`
                 says why. The CV-best parameters stay in `max_cv_params`. See
                 docs/dev/cvll-multicollinearity for why a flat CV curve makes this necessary.
@@ -663,7 +667,9 @@ class OptunaHyperparameterTuner:
             self.best_metric_value = best_objective_value
 
         self.max_cv_params = dict(self.best_estimator_params)
-        if self.use_conservative_adjustment == "auto" and int(self.best_estimator_params.get("basis_order", 0)) != 0:
+        if self.use_conservative_adjustment is False:
+            self.adjustment_note = "off: use_conservative_adjustment=False (the default)"
+        elif self.use_conservative_adjustment == "auto" and int(self.best_estimator_params.get("basis_order", 0)) != 0:
             self.adjustment_note = "skipped: use_conservative_adjustment='auto' adjusts only basis_order 0"
         elif self.use_conservative_adjustment:
             self._apply_conservative_adjustment(self.study.best_trial.number)

@@ -182,11 +182,15 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
 - Full-data CV can apply the conservative adjustment (core, shared with the censored-data tuners
   through `haldensity.core.cv.conservative`): after the search, the smallest bound whose mean CV
   log-likelihood is within 5% of a fold SD of the best, found by bracketing and bisection in log M.
-  Interim default `use_conservative_adjustment="auto"`: on when the CV-best basis order is 0 (flat
-  CV curves from nearly collinear indicator bases), off for k >= 1, where exact CV scoring already
-  avoids the huge-M choices (in 16 simulated k = 1 datasets forcing it on shrank M to 0.11-0.87x
-  the CV-best and made L2 error worse in 11). `True` / `False` force it on / off; the CV-best
-  stays in `max_cv_params`. Defaults to be revisited after the knot-aware normalizer benchmark.
+  **Off by default** (`use_conservative_adjustment=False`; Yilong, 2026-10-24): `True` turns it on,
+  `"auto"` only when the CV-best basis order is 0 (an interim default earlier in 0.2.0); the
+  CV-best stays in `max_cv_params`. Why off: at k = 0 with the exact objective (four truths, n = 320
+  and 1,280, 50 replicates each) the fit at the CV-best bound had KL 0.82-0.99 times the adjusted
+  fit's (8 of 16 KL/L2 intervals below 1, none above), the adjustment doubled the smooth truth's
+  boundary bias (0.207 vs 0.123 at x = 0.01), and the flat CV curve it guards against appeared in
+  0 of 800 fits; at k >= 1 it oversmoothed (in 16 simulated k = 1 datasets it shrank M to
+  0.11-0.87x the CV-best and made L2 error worse in 11). Default results change at k = 0 against
+  the interim default.
 - Full-data CV scores each fold by evaluating the fitted log density exactly at the validation
   points (with the accurate normalizer) instead of linearly interpolating `get_density()` on its
   200-point grid. In 16 simulated datasets (4 densities, n = 400 and 1,280, k = 1) the selected

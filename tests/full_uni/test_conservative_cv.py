@@ -68,8 +68,17 @@ def test_penalty_tuned_estimators_are_not_adjusted(data):
     assert "not tuned by norm_constraint" in tuner.adjustment_note
 
 
+def test_off_by_default(data):
+    tuner = OptunaHyperparameterTuner("CVXPYEstimator", data, cv_folds=3, random_state=0,
+                                      param_overrides={"basis_order": 0, "norm_constraint": (1.0, 200.0)})
+    tuner.optimize(n_trials=4, show_progress=False)
+    assert tuner.use_conservative_adjustment is False and tuner.conservative_params is None
+    assert tuner.best_params["norm_constraint"] == tuner.max_cv_params["norm_constraint"]
+    assert "off" in tuner.adjustment_note
+
+
 def test_auto_adjusts_only_basis_order_zero(data):
-    common = dict(cv_folds=3, random_state=0)
+    common = dict(cv_folds=3, random_state=0, use_conservative_adjustment="auto")
     k0 = OptunaHyperparameterTuner("CVXPYEstimator", data, param_overrides={"basis_order": 0}, **common)
     k0.optimize(n_trials=4, show_progress=False)
     assert k0.conservative_params is not None and k0.adjustment_results
