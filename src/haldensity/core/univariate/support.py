@@ -57,11 +57,11 @@ import cvxpy as cp
 import numpy as np
 import pandas as pd
 
-from haldensity.core.basis.univariate import create_basis_functions
 from haldensity.core.solvers.cvxpy import DEFAULT_SOLVER_THREADS, TIGHT_LADDER, limited_threads, with_threads
 from haldensity.core.univariate.objective import (
     STRUCTURED_ORDERS,
     candidate_knots,
+    dense_problem,
     normalizer_terms,
     objective_gradient,
     structured_problem,
@@ -113,22 +113,9 @@ class FullDataHALProblem:
             sparse = structured_problem(self.x, self.knots, self.basis_order, self.n_grid_points, norm_constraint)
             return BuiltProblem(sparse.problem, sparse.l1_constraint, sparse.theta, "structured",
                                 sparse.objective_scale, sparse.dual_scale)
-        data_basis = create_basis_functions(pd.DataFrame({"W1": self.x}), self.knots, order=self.basis_order)[0]
-        terms = normalizer_terms(self.x, self.knots, self.basis_order, self.n_grid_points, self.objective_normalizer)
-        theta = cp.Variable(data_basis.shape[1])
-        data_log_density = data_basis @ theta
-        if terms.basis is not None:
-            cells = terms.basis @ theta
-        else:
-            # k = 0 knot-aware: the level on the cell starting at a knot is the data term's value there
-            parts = [theta[0:1]] if terms.leading_intercept_cell else []
-            if terms.data_rows.size:
-                parts.append(data_log_density[terms.data_rows])
-            cells = cp.hstack(parts) if len(parts) > 1 else parts[0]
-        loss = -cp.sum(data_log_density) + self.n * cp.log_sum_exp(terms.log_widths + cells)
-        l1 = cp.norm1(theta[1:]) <= float(norm_constraint)
-        problem = cp.Problem(cp.Minimize(loss), [l1])
-        return BuiltProblem(problem, l1, lambda: None if theta.value is None else theta.value, "dense")
+        dense = dense_problem(self.x, self.knots, self.basis_order, self.n_grid_points, self.objective_normalizer,
+                              norm_constraint)
+        return BuiltProblem(dense.problem, dense.l1_constraint, dense.theta, "dense")
 
     def solve(self, norm_constraint: float, solver: str, options: dict[str, Any],
               threads: int = DEFAULT_SOLVER_THREADS) -> tuple[Optional[np.ndarray], str]:

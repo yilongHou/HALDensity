@@ -75,6 +75,15 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   Gaussian mixture, n = 400 and 1,280, k = 1 and 2): basis 1,121-1,257 -> 5-33 functions at
   n = 1,280; mean SE / Monte Carlo sd 1.11-2.76 -> 0.80-1.25; coverage of the truth 85-100%
   (median 100%) -> 83-99% (median 94%).
+- **The old midpoint rule without the n x p data basis** (Yilong, 2026-10-24): the data term
+  -sum_i f(x_i) is linear in theta, -s' theta with s the basis column sums, which are computed exactly
+  from sorted data and prefix sums (O(n log n); `haldensity.core.univariate.objective.data_basis_sums`).
+  The problem then holds only the normalizer's cells x p matrix (199 x p for the old midpoint rule),
+  built in float64. One builder (`objective.dense_problem`) serves the fit, the CV folds, basis
+  cleaning and the knots-added grid's dense form. The objective agrees with a float64 evaluation to
+  1e-12 at random theta; the 18 fixed fits of the restructure check change only at the float32
+  level of the old basis (densities by at most 1.3e-5, k = 1 coefficients by 9.3e-6; k = 0 fits are
+  identical).
 - Estimators that log no longer keep log files open: the file is opened only while a record is
   written, and each estimator's logger is private instead of being registered with
   `logging.getLogger` (which keeps every logger, and its open file, for the life of the process). In

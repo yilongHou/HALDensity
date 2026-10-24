@@ -14,7 +14,7 @@ Status: reference list, 2026-10-24. Each item says what was decided, when, and w
 | Degree k | Fixed when a study checks the theorem; **chosen by CV jointly with M** when HAL is compared with other estimators | Decided 2026-10-23 |
 | **Conservative adjustment** | `"auto"` (default): **on only when the CV-best order is k = 0**; margin **5% of the CV log-likelihood SD** (Yilong's rule), bisection search. Off for k ≥ 1 | For k = 0 the CV curve can be flat (spikes, Yilong's CVLL note: [cvll-multicollinearity/](cvll-multicollinearity/README.md)). For k ≥ 1 it oversmoothed: L2 worse in 11 of 16 test datasets |
 | One-SE rule | **Not used** | About 9× wider than the 5% margin; HAL's CV already picks M below the truth's norm |
-| If a safeguard is needed for k ≥ 1 later | Candidate: a paired-difference rule (SE of per-observation held-out log-likelihood differences vs the best M) | Pending the knot-aware benchmark |
+| CV safeguard for k ≥ 1 | **None** (decided 2026-10-24): the paired-difference rule is not adopted | The k = 1 CV curves decline gently with no pathological fits; a continuous fit cannot hide spikes; plain CV at k = 1–3 beat both sieves in the experiments. Reopen only if the paper rerun's imbalance diagnostics flag a problem. The k = 0 conservative adjustment may also go (session 69's check pending) |
 
 ## 2. The fitting objective
 
@@ -83,7 +83,6 @@ Status: reference list, 2026-10-24. Each item says what was decided, when, and w
 - Default objective per order (the exact objective at k = 0, the midpoint rule with the knots added to the grid at k = 1, the old midpoint rule at k ≥ 2, chosen per order inside one CV search), and extending the step-height rewrite to k ≥ 2.
 - Whether the paper's theory-checking runs use every knot (experiment side).
 - No SE when the final fit is uncertified (instead of using it with a warning).
-- Whether a CV safeguard is needed for k ≥ 1 once the objective sees spikes (paired-difference rule as the candidate).
 - Accurate normalizer for the censored-data estimators (RC project handoff).
 - A package default for the order k: fixed k = 2 or CV over {0, 1, 2} (theory suggests k = 2; Phase B and the paper-version simulation decide).
 - Undersmoothing for pointwise intervals (c ≈ 2) vs the CV fit: decided at the paper-version rerun; Phase B's bias/sd at the kink for k = 2, 3 informs it.

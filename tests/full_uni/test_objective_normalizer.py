@@ -18,8 +18,10 @@ def data():
     return pd.DataFrame({"W1": np.random.default_rng(0).beta(2.0, 5.0, size=300)})
 
 
-def test_default_reproduces_the_pre_option_problem_bit_for_bit(data):
-    # the objective exactly as CVXPYEstimator built it before objective_normalizer / max_knots
+def test_default_matches_the_pre_option_problem(data):
+    # the objective exactly as CVXPYEstimator built it before objective_normalizer / max_knots, with the
+    # n x m float32 data basis; the fit now uses the exact float64 column sums of that basis, so the
+    # solutions agree to the float32 rounding (identical at k = 0, whose basis is 0/1)
     for k in (0, 1):
         knots = np.unique(data["W1"].dropna())
         b_ik = create_basis_functions(data, knots, order=k)[0]
@@ -31,7 +33,9 @@ def test_default_reproduces_the_pre_option_problem_bit_for_bit(data):
         solve_cvxpy_problem(problem=problem, primary_solver="ECOS", use_secondary_solver=False)
         fit = CVXPYEstimator(norm_constraint=5.0, basis_order=k, max_knots=None, solver_tolerance="default",
                              **ECOS).fit(data)
-        np.testing.assert_array_equal(fit.optimized_theta_raw, theta.value)
+        # theta[0] is not identified (a constant added to f cancels between the data term and n log Z)
+        np.testing.assert_allclose(fit.optimized_theta_raw[1:], theta.value[1:], rtol=0, atol=1e-5)
+        assert fit.objective_value_ == pytest.approx(problem.value, rel=1e-7)
 
 
 def test_k0_knot_aware_objective_is_the_exact_integral(data):

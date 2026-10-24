@@ -16,6 +16,7 @@ from haldensity.core.univariate.objective import (
     OBJECTIVE_NORMALIZERS,
     STRUCTURED_ORDERS,
     candidate_knots,
+    dense_problem,
     normalizer_terms,
     resolve_max_knots,
     structured_problem,
@@ -270,46 +271,15 @@ class CVXPYEstimator(BaseEstimator):
         return lambda: fit.theta_raw
 
     def _dense_problem(self, data: pd.DataFrame, grid_points_hal: np.ndarray):
-        """The problem with the n x m data basis (midpoint objective, and knot-aware for k >= 2)."""
-        n_samples = len(data)
-        # Build basis for the data points
-        basis_array, basis_names = create_basis_functions(data, grid_points_hal, order=self.basis_order)
-        b_ik = basis_array  # shape: (n_samples, K)
-        self.basis_names = basis_names
-
-        # Cells of the objective's normalizer (midpoint grid, or knot-aware)
-        terms = normalizer_terms(self._train_x, grid_points_hal, self.basis_order, self.n_grid_points,
-                                 self.objective_normalizer)
-
-        # K: number of basis functions
-        if self.basis_order == 0:
-            K = 1 + len(grid_points_hal)  # {1, I(x >= ξ₁), ..., I(x >= ξₘ)}
-        else:
-            K = (self.basis_order + 1) + len(grid_points_hal)  # {1, x, ..., x^k, (x-ξ₁)₊^k, ..., (x-ξₘ)₊^k}
-
-        theta = cp.Variable(K)
-
-        # Data log-density at the data points and at the evaluation grid
-        # Since our basis includes the intercept, we use the full basis @ theta
-        data_log_density = b_ik @ theta
-        first_term = -cp.sum(data_log_density)
-        if terms.basis is not None:
-            log_density_grid = terms.basis @ theta
-        else:
-            # k = 0 knot-aware: the level on the cell starting at a knot is the data term's value there
-            parts = [theta[0:1]] if terms.leading_intercept_cell else []
-            if terms.data_rows.size:
-                parts.append(data_log_density[terms.data_rows])
-            log_density_grid = cp.hstack(parts) if len(parts) > 1 else parts[0]
-        log_terms = terms.log_widths + log_density_grid
-        log_Z = cp.log_sum_exp(log_terms)
-        second_term = n_samples * log_Z
-
-        loss = first_term + second_term
-        constraints = [cp.norm1(theta[1:]) <= self.norm_constraint]
-        objective = cp.Minimize(loss)
-        problem = cp.Problem(objective, constraints)
-        return problem, constraints[0], (lambda: None if theta.value is None else theta.value.copy())
+        """The problem in theta (haldensity.core.univariate.objective.dense_problem): the old midpoint
+        rule, the knots-added grid for k >= 2, and the reference form. The data term is the basis
+        column sums times theta, so no n x m data basis is built."""
+        self.basis_names = create_basis_functions(
+            pd.DataFrame({'W1': [0.5]}), grid_points_hal, order=self.basis_order
+        )[1]
+        dense = dense_problem(self._train_x, grid_points_hal, self.basis_order, self.n_grid_points,
+                              self.objective_normalizer, self.norm_constraint)
+        return dense.problem, dense.l1_constraint, dense.theta
 
     def objective_log_normalizer(self, theta: Optional[np.ndarray] = None) -> float:
         """log Z of the fitting objective's own normalizer at ``theta`` (default: the raw solution).

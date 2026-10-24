@@ -44,7 +44,9 @@ def _objective(fit, theta, terms):
 @pytest.mark.parametrize("k,n,M,K", CASES)
 def test_structured_and_dense_knot_aware_give_the_same_solution(k, n, M, K):
     data = pd.DataFrame({"W1": np.random.default_rng(n + k).beta(2.0, 5.0, size=n)})
-    structured, dense = _fit(data, k, M, K, "structured"), _fit(data, k, M, K, "dense")
+    # both through the tight final fit, so solver tolerance does not blur the comparison of the forms
+    structured = _fit(data, k, M, K, "structured", solver_tolerance="tight")
+    dense = _fit(data, k, M, K, "dense", solver_tolerance="tight")
     assert structured.knot_aware_formulation_used_ == "structured"
     assert dense.knot_aware_formulation_used_ == "dense"
     np.testing.assert_array_equal(structured._grid_points_hal, dense._grid_points_hal)

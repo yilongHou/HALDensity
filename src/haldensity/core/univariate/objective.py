@@ -263,6 +263,64 @@ def structured_problem(
     return StructuredProblem(problem, l1, theta, 2 * (m + 1), objective_scale=float(n), dual_scale=float(n) / S)
 
 
+def basis_matrix(points: np.ndarray, knots: np.ndarray, basis_order: int) -> np.ndarray:
+    """The HAL basis at ``points`` in float64: 1, t, ..., t^k, then I(t >= xi) (k = 0) or (t - xi)_+^k."""
+    t = np.asarray(points, dtype=float).ravel()
+    knots = np.asarray(knots, dtype=float).ravel()
+    k = int(basis_order)
+    columns = [np.ones_like(t)] + [t ** r for r in range(1, k + 1)]
+    if knots.size:
+        columns.append((t[:, None] >= knots[None, :]).astype(float) if k == 0
+                       else np.maximum(t[:, None] - knots[None, :], 0.0) ** k)
+    return np.column_stack(columns)
+
+
+def data_basis_sums(x: np.ndarray, knots: np.ndarray, basis_order: int) -> np.ndarray:
+    """sum_i phi(x_i) for every basis function, exactly in float64 from sorted data and prefix sums
+    (O(n log n)): the data term -sum_i f(x_i) is -data_basis_sums @ theta, without the n x p basis."""
+    x = np.asarray(x, dtype=float).ravel()
+    x = x[np.isfinite(x)]
+    k = int(basis_order)
+    head = [float(x.size)] + [float(np.sum(x ** r)) for r in range(1, k + 1)]
+    return np.concatenate((head, _tail_sums(x, np.ones(x.size), np.asarray(knots, dtype=float).ravel(), k)))
+
+
+@dataclass
+class DenseProblem:
+    """The HAL-MLE in theta (all normalizers); ``theta()`` returns the solution."""
+
+    problem: cp.Problem
+    l1_constraint: cp.Constraint
+    theta: Callable[[], Optional[np.ndarray]]
+
+
+def dense_problem(
+    x: np.ndarray,
+    knots: np.ndarray,
+    basis_order: int,
+    n_grid_points: int,
+    objective_normalizer: str,
+    norm_constraint: float,
+) -> DenseProblem:
+    """``-data_basis_sums @ theta + n log sum_c w_c exp(phi(t_c)' theta)`` with ``||theta[1:]||_1 <= M``.
+
+    The data term is linear in theta, so only the cells x p normalizer basis is a matrix (199 x p for
+    the old midpoint rule; one row per cell of the knots-added grid otherwise). Before 0.2.0 the
+    problem also held the n x p data basis (17 GB at n = 20,000 with every knot).
+    """
+    x = np.asarray(x, dtype=float).ravel()
+    x = x[np.isfinite(x)]
+    k = int(basis_order)
+    sums = data_basis_sums(x, knots, k)
+    terms = normalizer_terms(x, knots, k, n_grid_points, objective_normalizer, build_basis=False)
+    cells = basis_matrix(terms.points, knots, k)
+    theta = cp.Variable(sums.size)
+    loss = -sums @ theta + x.size * cp.log_sum_exp(terms.log_widths + cells @ theta)
+    l1 = cp.norm1(theta[1:]) <= float(norm_constraint)
+    return DenseProblem(cp.Problem(cp.Minimize(loss), [l1]), l1,
+                        lambda: None if theta.value is None else np.asarray(theta.value, dtype=float).copy())
+
+
 def _tail_sums(points: np.ndarray, weights: np.ndarray, knots: np.ndarray, basis_order: int) -> np.ndarray:
     """sum_p weights_p * phi_knot(points_p) for every knot: I(p >= xi) for k = 0, (p - xi)_+^k for k >= 1."""
     order = np.argsort(points, kind="stable")
