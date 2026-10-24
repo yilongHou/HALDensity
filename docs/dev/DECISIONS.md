@@ -28,10 +28,10 @@ Status: reference list, 2026-10-24. Each item says what was decided, when, and w
 
 | Setting | Decision |
 | --- | --- |
-| **Final fit at the chosen M** | **One solve: MOSEK at 1e-12** (relative gap, primal and dual feasibility). Fallback ladder with tight tolerances: **CLARABEL 1e-12 → CLARABEL 1e-10 → ECOS 1e-12 → ECOS 1e-10 → SCS 1e-9**. Record solver, status and achieved accuracy (decided 2026-10-24). Code: `CVXPYEstimator(solver_tolerance="tight")` (default; `"default"` = v0.1.0), `haldensity.core.solvers.TIGHT_LADDER`, `haldensity.core.univariate.support.certified_solve` |
+| **Final fit at the chosen M** | **One solve: MOSEK at 1e-12** (relative gap, primal and dual feasibility). Fallback ladder with tight tolerances: **CLARABEL 1e-12 → CLARABEL 1e-10 → ECOS 1e-12 → ECOS 1e-10 → SCS 1e-9, the SCS step capped at 600 s** (cap decided 2026-10-24: without it SCS ran past 17 min at n = 20,000). Record solver, status and achieved accuracy (decided 2026-10-24). Code: `CVXPYEstimator(solver_tolerance="tight")` (default; `"default"` = v0.1.0), `haldensity.core.solvers.TIGHT_LADDER`, `haldensity.core.univariate.support.certified_solve` |
 | CV trials | Default tolerances (MOSEK first, then the package's waterfall) |
 | Pruning | Coefficients with \|θ\| ≤ 1e-4 set to zero (HALDensity's rule) |
-| **KKT certification** of the final fit | λ = median \|∂L/∂θⱼ\| over kept coefficients with \|θⱼ\| ≥ 0.1·max\|θ\|; **certified** if no kept coefficient has \|∂L/∂θⱼ\| < 0.99λ and no coefficient has \|∂L/∂θⱼ\| > 1.01λ. If ‖θ[1:]‖₁ < (1 − 1e-3)M the bound is not binding and the fit is certified when max \|∂L/∂θⱼ\|/n ≤ 1e-5; at the bound, passing either test certifies (added 2026-10-24). If not certified, try the next solver in the ladder; if none certifies, keep the best attempt, flagged and warned |
+| **KKT certification** of the final fit | λ = median \|∂L/∂θⱼ\| over kept coefficients with \|θⱼ\| ≥ 0.1·max\|θ\|; **certified** if no kept coefficient has \|∂L/∂θⱼ\| < 0.99λ and no coefficient has \|∂L/∂θⱼ\| > 1.01λ. If ‖θ[1:]‖₁ < (1 − 1e-3)M the bound is not binding and the fit is certified when max \|∂L/∂θⱼ\|/n ≤ 1e-5; at the bound, passing either test certifies (added 2026-10-24). If not certified, try the next solver in the ladder; if none certifies, keep the best attempt from any solver (the fewest coordinates failing the conditions), flagged and warned (decided 2026-10-24). No repair of uncertified solutions: setting small violators to zero and re-checking certified 0 of 18 in the study, and the re-solve-on-the-support variant never certified a problem the ladder could not ([benchmarks/final_fit_repair/](benchmarks/final_fit_repair/README.md)) |
 | Point estimate | **The tight, pruned, certified final fit** (point estimates change slightly from v0.1.0; noted in the CHANGELOG) |
 | Without MOSEK | The package must work: the free-solver ladder is the full path |
 
@@ -80,7 +80,7 @@ Status: reference list, 2026-10-24. Each item says what was decided, when, and w
 ## 8. Pending decisions
 
 - Defaults for the knot-aware objective normalizer and the knot cap K: benchmark done 2026-10-24, recommendation knot-aware with K = 1,000 ([benchmarks/knot_aware_normalizer/](benchmarks/knot_aware_normalizer/README.md)); awaiting Yilong.
-- Final fit at large n: cap the SCS step at 600 s; no zero-and-recheck rule; what to do with the SE of an uncertified fit ([benchmarks/final_fit_repair/](benchmarks/final_fit_repair/README.md)); awaiting Yilong.
+- No SE when the final fit is uncertified (instead of using it with a warning).
 - Whether a CV safeguard is needed for k ≥ 1 once the objective sees spikes (paired-difference rule as the candidate).
 - Accurate normalizer for the censored-data estimators (RC project handoff).
 - A package default for the order k (theory suggests k = 2; Phase B and the paper-version simulation decide).

@@ -72,9 +72,10 @@ class CVXPYEstimator(BaseEstimator):
                 (observations, de-duplicated); None (default) uses every unique data value.
             solver_tolerance: "tight" (default; for the final fit at the chosen bound): the solvers
                 from `solver` and `solver_waterfall` with tight tolerances (MOSEK 1e-12; CLARABEL
-                1e-12 then 1e-10; ECOS 1e-12 then 1e-10; SCS 1e-9), each solution pruned at `tol`
-                and checked against the optimality conditions, the first certified one kept (else
-                the least violating, with a warning). The result is the point estimate and its
+                1e-12 then 1e-10; ECOS 1e-12 then 1e-10; SCS 1e-9 capped at 600 s), each solution
+                pruned at `tol` and checked against the optimality conditions, the first certified
+                one kept; if none is, the best attempt from any solver (fewest coordinates failing
+                the conditions), with a warning and certified_ = False. The result is the point estimate and its
                 basis the delta-method SE basis; certified_, kkt_ and solve_attempts_ record the
                 check. "default": the solvers' own tolerances, first acceptable status wins, no
                 check (v0.1.0; OptunaHyperparameterTuner uses it in the CV folds).
@@ -241,8 +242,8 @@ class CVXPYEstimator(BaseEstimator):
         if not fit.certified:
             warnings.warn(
                 f"The fit at norm_constraint={self.norm_constraint} could not be certified by the optimality "
-                f"check (best of the solver ladder: {fit.kkt['n_kept_violating']} kept coefficients violate it, "
-                f"max ratio {fit.kkt['max_ratio']:.4g}); it is used anyway and certified_ is False.",
+                f"check; the best attempt ({fit.solver_used} {fit.option}: {fit.kkt['n_failing']} coordinates fail "
+                f"the conditions, max ratio {fit.kkt['max_ratio']:.4g}) is used and certified_ is False.",
                 UserWarning,
                 stacklevel=3,
             )

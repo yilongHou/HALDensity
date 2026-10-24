@@ -1,6 +1,13 @@
 # Final fit at large n: a proposed rule for uncertified solutions
 
-Proposal for Yilong's decision (2026-10-24). It is core; nothing here is a package default yet.
+Proposal for Yilong's decision (2026-10-24). It is core.
+
+**Decision (Yilong, 2026-10-24):** adopted. The SCS step is capped at 600 s
+(`haldensity.core.solvers.SCS_TIME_LIMIT_S`). If nothing certifies, the best attempt from any solver
+is kept (the fewest coordinates failing the optimality conditions), flagged and warned. The "zero"
+repair was not adopted, and the "polish" repair (`repair_support`, `certified_solve(repair=...)`) was
+removed from the package after this study. `rule_eval.py` therefore runs only at commit `aeba275`,
+where it was run. Still open: whether to give no SE when the final fit is uncertified.
 
 **Proposed rule:**
 - Keep the tight ladder, MOSEK 1e-12 → CLARABEL → ECOS → SCS.

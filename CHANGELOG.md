@@ -80,10 +80,12 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   the old split.
 - The final fit is one tight, certified solve (`CVXPYEstimator(solver_tolerance="tight")`, the
   new default): MOSEK with interior-point tolerances 1e-12 (relative gap, primal and dual
-  feasibility), then CLARABEL 1e-12/1e-10, ECOS 1e-12/1e-10, SCS 1e-9 (`haldensity.core.solvers.
-  TIGHT_LADDER`, following `solver` / `solver_waterfall`); each solution is pruned at `tol` (1e-4)
-  and checked against the optimality conditions, the first certified one is kept, else the least
-  violating with a warning. That solution is the point estimate and its basis the SE basis
+  feasibility), then CLARABEL 1e-12/1e-10, ECOS 1e-12/1e-10, SCS 1e-9 capped at 600 s
+  (`haldensity.core.solvers.TIGHT_LADDER`, following `solver` / `solver_waterfall`); each solution
+  is pruned at `tol` (1e-4) and checked against the optimality conditions, the first certified one
+  is kept. If none is, the best attempt from any solver is kept (the fewest coordinates failing the
+  conditions, `kkt_["n_failing"]`), with a warning and `certified_ = False` (Yilong, 2026-10-24;
+  evidence in `docs/dev/benchmarks/final_fit_repair/`). That solution is the point estimate and its basis the SE basis
   (`estimate_covariance_beta` uses it directly, no separate refit). `certified_`, `kkt_`,
   `solve_attempts_`, `solver_option_` and `get_results()` record solver, status and the check.
   **Point estimates change slightly from v0.1.0**: on the 18 fixed fits of the restructure check

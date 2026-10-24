@@ -118,6 +118,9 @@ def solve_cvxpy_problem(
 # (relative gap, primal and dual feasibility) are 1e-12; NEAR_REL = 1 stops MOSEK from reporting a
 # solution that only meets 1000 x those tolerances as "optimal", so such a stop shows up as
 # "optimal_inaccurate" (accept_unknown) and the optimality check decides whether it is good enough.
+# The SCS step is capped at SCS_TIME_LIMIT_S (Yilong, 2026-10-24: without a cap it ran past 17 min at
+# n = 20,000; with it, 7 of the 9 problems that reached it were certified, docs/dev/benchmarks/final_fit_repair).
+SCS_TIME_LIMIT_S = 600.0
 MOSEK_TIGHT_PARAMS: dict[str, float] = {
     "MSK_DPAR_INTPNT_CO_TOL_REL_GAP": 1e-12,
     "MSK_DPAR_INTPNT_CO_TOL_PFEAS": 1e-12,
@@ -134,7 +137,8 @@ TIGHT_STEPS: dict[str, tuple[tuple[str, str, dict[str, Any]], ...]] = {
         ("ECOS", "tol 1e-12", dict(abstol=1e-12, reltol=1e-12, feastol=1e-12, max_iters=500)),
         ("ECOS", "tol 1e-10", dict(abstol=1e-10, reltol=1e-10, feastol=1e-10, max_iters=300)),
     ),
-    "SCS": (("SCS", "eps 1e-9", dict(eps_abs=1e-9, eps_rel=1e-9, max_iters=200000)),),
+    "SCS": (("SCS", "eps 1e-9, 600 s cap",
+             dict(eps_abs=1e-9, eps_rel=1e-9, max_iters=200000, time_limit_secs=SCS_TIME_LIMIT_S)),),
 }
 
 

@@ -38,7 +38,7 @@ def test_tight_tolerances_reach_every_solver(monkeypatch, data):
     assert calls[2] == dict(solver="CLARABEL", tol_gap_abs=1e-10, tol_gap_rel=1e-10, tol_feas=1e-10, max_iter=300)
     assert calls[3] == dict(solver="ECOS", abstol=1e-12, reltol=1e-12, feastol=1e-12, max_iters=500)
     assert calls[4] == dict(solver="ECOS", abstol=1e-10, reltol=1e-10, feastol=1e-10, max_iters=300)
-    assert calls[5] == dict(solver="SCS", eps_abs=1e-9, eps_rel=1e-9, max_iters=200000)
+    assert calls[5] == dict(solver="SCS", eps_abs=1e-9, eps_rel=1e-9, max_iters=200000, time_limit_secs=600.0)
 
     # solver_tolerance="default" passes no tolerance (v0.1.0)
     calls.clear()
@@ -100,15 +100,43 @@ def test_the_bound_is_classified_by_the_l1_norm(data):
     assert far["bound"] == "slack" and not far["certified"]
 
 
-def test_an_uncertified_fit_is_flagged_and_warned(monkeypatch, data):
-    import haldensity.core.univariate.support as support
+def test_the_scs_step_is_capped(data):
+    from haldensity.core.solvers.cvxpy import SCS_TIME_LIMIT_S, TIGHT_LADDER
+    from haldensity.core.univariate.support import _solve_quietly
+    assert SCS_TIME_LIMIT_S == 600.0
+    assert [opts["time_limit_secs"] for solver, _, opts in TIGHT_LADDER if solver == "SCS"] == [600.0]
+    # SCS stops at its time limit: a short one on a problem it cannot finish to 1e-12 in time
+    built = FullDataHALProblem(data, 1).build(50.0)
+    _solve_quietly(built.problem, "SCS", dict(eps_abs=1e-12, eps_rel=1e-12, max_iters=10**7, time_limit_secs=0.05))
+    assert built.problem.solver_stats.solve_time < 0.05 + 0.25
 
-    monkeypatch.setattr(support, "kkt_report",
-                        lambda *a, **kw: {**kkt_report(*a, **kw), "certified": False, "n_kept_violating": 1})
+
+def test_the_best_attempt_is_kept_and_flagged(monkeypatch, data):
+    import haldensity.core.univariate.support as support
+    real, failing = support.kkt_report, iter([5, 2, 7, 3, 9])   # one value per attempt, none certified
+
+    def nothing_certifies(*args, **kwargs):
+        return {**real(*args, **kwargs), "certified": False, "n_failing": next(failing)}
+
+    monkeypatch.setattr(support, "kkt_report", nothing_certifies)
     with pytest.warns(UserWarning, match="could not be certified"):
         fit = CVXPYEstimator(norm_constraint=20.0, basis_order=1, log_frequency=-1, **FREE_SOLVERS).fit(data)
-    assert fit.certified_ is False and len(fit.solve_attempts_) == 5      # every configuration tried
-    assert fit.get_results()["certified"] is False
+    assert [(a["solver"], a["option"]) for a in fit.solve_attempts_] == [
+        ("CLARABEL", "tol 1e-12"), ("CLARABEL", "tol 1e-10"), ("ECOS", "tol 1e-12"), ("ECOS", "tol 1e-10"),
+        ("SCS", "eps 1e-9, 600 s cap")]                           # every solver tried
+    assert (fit.solver_used_, fit.solver_option_) == ("CLARABEL", "tol 1e-10")   # the fewest failing (2)
+    assert fit.certified_ is False and fit.get_results()["certified"] is False
+    assert fit.kkt_["n_failing"] == 2
+
+
+def test_failing_coordinates_are_counted_for_either_bound(data):
+    fit = CVXPYEstimator(norm_constraint=20.0, basis_order=1, log_frequency=-1, **FREE_SOLVERS).fit(data)
+    problem, theta = FullDataHALProblem(data, 1), fit.optimized_theta_raw.copy()
+    assert kkt_report(problem, theta, norm_constraint=20.0)["n_failing"] == 0
+    theta[2 + int(np.flatnonzero(np.abs(theta[2:]) <= 1e-8)[0])] = 1e-3        # a kept coefficient that should be 0
+    assert kkt_report(problem, theta, norm_constraint=20.0)["n_failing"] >= 1
+    slack = kkt_report(problem, fit.optimized_theta_raw, norm_constraint=40.0)  # far inside the ball
+    assert slack["bound"] == "slack" and slack["n_failing"] > 0 and not slack["certified"]
 
 
 def test_invalid_solver_tolerance(data):
