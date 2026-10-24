@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import warnings
 from typing import Sequence
 
 import cvxpy as cp
@@ -330,6 +331,14 @@ class MultvarHAL:
     ) -> "MultvarHAL":
         fit_start = time.perf_counter()
         self.training_data_ = coerce_multivariate_data(data)
+        if self.training_data_.shape[1] == 1:
+            warnings.warn(
+                "MultvarHAL was called with one-dimensional data. Use the univariate "
+                "implementation in haldensity.full_uni (e.g. CVXPYEstimator), which "
+                "normalizes on a deterministic grid instead of quasi-Monte Carlo.",
+                UserWarning,
+                stacklevel=2,
+            )
         if self.training_data_.shape[1] != len(self.support):
             raise ValueError(
                 "support dimension must match the number of columns in data"

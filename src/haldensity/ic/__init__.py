@@ -1,4 +1,7 @@
-"""Interval-censored data: midpoint-imputed initial fit, EM, direct FISTA / projected-GD fits and tuners."""
+"""Interval-censored data: midpoint-imputed initial fit, EM, direct FISTA / projected-GD fits and tuners.
+
+Current-status data (one inspection per subject) is handled in ``haldensity.ic.current_status``.
+"""
 
 from haldensity.ic.estimators import (
     IntervalCensoredEMEstimator,

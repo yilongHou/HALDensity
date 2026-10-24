@@ -117,13 +117,14 @@ def test_multvarhal_auto_k0_prefers_sobol_when_exact_budget_is_larger():
 def test_multvarhal_auto_k_ge_1_d1_prefers_midpoint():
     data = np.array([[0.10], [0.35], [0.55], [0.80], [0.90]])
 
-    model = MultvarHAL(
-        k=1,
-        norm_constraint=12.0,
-        support=((0.0, 1.0),),
-        quadrature_points_per_dim=12,
-        use_secondary_solver=True,
-    ).fit(data)
+    with pytest.warns(UserWarning, match="haldensity.full_uni"):
+        model = MultvarHAL(
+            k=1,
+            norm_constraint=12.0,
+            support=((0.0, 1.0),),
+            quadrature_points_per_dim=12,
+            use_secondary_solver=True,
+        ).fit(data)
 
     summary = model.summary()
     assert summary["normalizer_method_used"] == "midpoint"
@@ -140,3 +141,9 @@ def test_multvarhal_exact_is_only_available_for_k0():
             use_secondary_solver=True,
         ).fit(np.array([[0.2, 0.3], [0.6, 0.8]]))
 
+
+
+def test_multvarhal_warns_for_one_dimensional_data():
+    data = np.random.default_rng(0).beta(2.0, 5.0, size=(30, 1))
+    with pytest.warns(UserWarning, match="haldensity.full_uni"):
+        MultvarHAL(k=0, norm_constraint=5.0, support=[(0.0, 1.0)], quadrature_points_per_dim=10).fit(data)

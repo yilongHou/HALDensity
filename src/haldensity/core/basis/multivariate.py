@@ -153,27 +153,6 @@ def summarize_basis_catalog(
     return summary
 
 
-def extract_term_type_metrics(
-    summary: pd.DataFrame,
-    prefix: str = "",
-    term_types: tuple[str, ...] = ("poly", "section-1", "full"),
-) -> dict[str, float | int]:
-    """Flatten term-type counts and coefficient mass into a metric dictionary."""
-    metrics: dict[str, float | int] = {}
-    prefix_text = f"{prefix}_" if prefix else ""
-
-    for term_type in term_types:
-        term_key = term_type.replace("-", "_")
-        row = summary.loc[summary["term_type"].eq(term_type)]
-        metrics[f"{prefix_text}{term_key}_count"] = (
-            int(row["count"].iloc[0]) if not row.empty else 0
-        )
-        if "abs_coefficient_sum" in summary.columns:
-            metrics[f"{prefix_text}{term_key}_abs_mass"] = (
-                float(row["abs_coefficient_sum"].iloc[0]) if not row.empty else 0.0
-            )
-    return metrics
-
 
 def summarize_design_matrix(
     basis_matrix: np.ndarray,

@@ -1,4 +1,11 @@
-"""Pointwise AIPW estimator of the right-censored survival probability."""
+"""Pointwise AIPW estimator of the right-censored survival probability.
+
+AIPW is not a plug-in estimator: its one-step correction can move the raw
+estimate outside the parameter's range (e.g. a survival probability below 0
+or above 1). The result reports the raw value (``psi_aipw_raw``) and a
+version clipped to [0, 1] (``psi_aipw_clipped``). Targeting (TMLE) stays a
+plug-in, which is why it is preferred.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -165,7 +172,14 @@ def _package_pointwise_aipw_fit(
 
 
 class RightCensoredSurvivalAIPWLearner:
-    """Pointwise AIPW estimator for right-censored survival targets."""
+    """Pointwise AIPW estimator for right-censored survival targets.
+
+    AIPW is not a plug-in estimator: its one-step correction can move the raw
+    estimate outside the parameter's range (e.g. a survival probability below 0
+    or above 1). The result reports the raw value (``psi_aipw_raw``) and a
+    version clipped to [0, 1] (``psi_aipw_clipped``). Targeting (TMLE) stays a
+    plug-in, which is why it is preferred.
+    """
 
     def __init__(
         self,
