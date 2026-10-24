@@ -97,7 +97,7 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   solvers' own tolerances (`OptunaHyperparameterTuner(cv_solver_tolerance="default")`); the old
   final fit is `solver_tolerance="default"` (bit for bit). The optimality check now also handles a
   bound that is not binding (||theta[1:]||_1 < (1 - 1e-3) M: certified when max |gradient| / n <=
-  1e-5), and basis
+  1e-5; at the bound either test certifies), and basis
   cleaning of `solver_tolerance="default"` fits starts with MOSEK 1e-12 as well.
 - `haldensity.rc.fit_right_censored(method=...)` and `fit_ipcw_hal`, `fit_l1mle_m1`,
   `fit_cvl1mle` (default method), `fit_undersmoothed`: the four right-censored point estimators

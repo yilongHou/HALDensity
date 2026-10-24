@@ -24,7 +24,8 @@ certifies the result with :func:`kkt_report`:
   |gradient_j| > 1.01 lambda;
 * if ||theta[1:]||_1 < (1 - 1e-3) M the bound is not binding (lambda = 0) and
   the solution is certified when max_j |gradient_j| / n <= 1e-5 (the 1e-3
-  covers MOSEK's near-optimal stop, e.g. at 0.99978 M).
+  covers MOSEK's near-optimal stop, e.g. at 0.99978 M); at the bound, a
+  solution passing either test is certified (lambda may be ~0 there).
 
 The same routine (:func:`certified_solve`, MOSEK 1e-12 first) is the final fit
 of ``CVXPYEstimator(solver_tolerance="tight")``, its default: there the
@@ -220,6 +221,9 @@ def kkt_report(problem: FullDataHALProblem, theta: np.ndarray, prune: float = PR
     violating = int(np.sum(kept & (ratio < slack)))
     max_ratio = float(np.nanmax(ratio)) if ratio.size and np.any(np.isfinite(ratio)) else float("nan")
     certified = violating == 0 and (not np.isfinite(max_ratio) or max_ratio <= MAX_RATIO)
+    if norm_constraint is not None:
+        # at the bound with lambda ~ 0 a vanishing gradient is also optimal
+        certified = certified or max_gradient <= SLACK_GRADIENT_TOL
     return dict(bound="active" if norm_constraint is not None else "assumed active", lambda_hat=lam,
                 n_kept_violating=violating, n_near_active=int(np.sum(ratio >= slack)), max_ratio=max_ratio,
                 certified=bool(certified), **common)
