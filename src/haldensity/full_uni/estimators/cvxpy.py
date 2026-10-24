@@ -1,9 +1,10 @@
 import numpy as np
 import pandas as pd
 import cvxpy as cp
+import warnings
 from typing import Optional
 from haldensity.core.basis.univariate import create_basis_functions
-from haldensity.core.solvers.cvxpy import solve_cvxpy_problem
+from haldensity.core.solvers.cvxpy import build_solver_sequence, solve_cvxpy_problem, tight_ladder
 from haldensity.core.univariate.base_estimator import BaseEstimator
 from haldensity.core.univariate.objective import (
     OBJECTIVE_NORMALIZERS,
@@ -12,6 +13,10 @@ from haldensity.core.univariate.objective import (
     normalizer_terms,
     structured_problem,
 )
+from haldensity.core.univariate.support import FullDataHALProblem, certified_solve
+
+
+SOLVER_TOLERANCES = ("tight", "default")
 
 
 class CVXPYEstimator(BaseEstimator):
@@ -47,6 +52,7 @@ class CVXPYEstimator(BaseEstimator):
         normalizer: str = "gauss_legendre",
         objective_normalizer: str = "midpoint",
         max_knots: Optional[int] = None,
+        solver_tolerance: str = "tight",
     ):
         """
         Initialize CVXPY estimator.
@@ -64,7 +70,17 @@ class CVXPYEstimator(BaseEstimator):
                 per cell between consecutive knots, reusing the data term's values).
             max_knots: cap K on the number of candidate knots, placed at K data quantiles
                 (observations, de-duplicated); None (default) uses every unique data value.
+            solver_tolerance: "tight" (default; for the final fit at the chosen bound): the solvers
+                from `solver` and `solver_waterfall` with tight tolerances (MOSEK 1e-12; CLARABEL
+                1e-12 then 1e-10; ECOS 1e-12 then 1e-10; SCS 1e-9), each solution pruned at `tol`
+                and checked against the optimality conditions, the first certified one kept (else
+                the least violating, with a warning). The result is the point estimate and its
+                basis the delta-method SE basis; certified_, kkt_ and solve_attempts_ record the
+                check. "default": the solvers' own tolerances, first acceptable status wins, no
+                check (v0.1.0; OptunaHyperparameterTuner uses it in the CV folds).
         """
+        if solver_tolerance not in SOLVER_TOLERANCES:
+            raise ValueError(f"solver_tolerance must be one of {SOLVER_TOLERANCES}, got {solver_tolerance!r}")
         if objective_normalizer not in OBJECTIVE_NORMALIZERS:
             raise ValueError(f"objective_normalizer must be one of {OBJECTIVE_NORMALIZERS}, got {objective_normalizer!r}")
         if max_knots is not None and int(max_knots) < 1:
@@ -81,11 +97,17 @@ class CVXPYEstimator(BaseEstimator):
         self.solver = solver
         self.objective_normalizer = objective_normalizer
         self.max_knots = None if max_knots is None else int(max_knots)
+        self.solver_tolerance = solver_tolerance
         
         # Internal, non-standard attributes for inspection
         self.optimized_theta_raw: Optional[np.ndarray] = None
         self.lambda_val_lag: Optional[float] = None
         self.knot_aware_formulation_used_: Optional[str] = None
+        self.certified_: Optional[bool] = None
+        self.kkt_: Optional[dict] = None
+        self.solve_attempts_: tuple = ()
+        self.support_ = None
+        self.solver_option_: Optional[str] = None
         self.use_secondary_solver = use_secondary_solver
         self.solver_waterfall = solver_waterfall
         self.solver_used_: Optional[str] = None
@@ -107,44 +129,12 @@ class CVXPYEstimator(BaseEstimator):
         self._train_x = data['W1'].to_numpy(dtype=float)
         
         grid_eval = np.linspace(0, 1, self.n_grid_points)
-        structured = (
-            self.objective_normalizer == "knot_aware"
-            and self.basis_order in STRUCTURED_ORDERS
-            and self.knot_aware_formulation == "structured"
-        )
-        solve_options = dict(
-            primary_solver=self.solver,
-            use_secondary_solver=self.use_secondary_solver,
-            solver_waterfall=self.solver_waterfall,
-        )
-        solve_result = None
-        if structured:
-            # Sparse form of the same problem: no n x m basis is built
-            self.basis_names = create_basis_functions(
-                pd.DataFrame({'W1': [0.5]}), grid_points_hal, order=self.basis_order
-            )[1]
-            sparse = structured_problem(self._train_x, grid_points_hal, self.basis_order, self.n_grid_points,
-                                        self.norm_constraint)
-            try:
-                # only a fully converged solve; otherwise the dense form below, as before this formulation
-                solve_result = solve_cvxpy_problem(problem=sparse.problem, acceptable_statuses=("optimal",),
-                                                   **solve_options)
-            except RuntimeError:
-                solve_result = None
-        if solve_result is not None:
-            self.knot_aware_formulation_used_ = "structured"
-            self.objective_value_ = solve_result.objective_value * sparse.objective_scale
-            dual = sparse.l1_constraint.dual_value
-            self.lambda_val_lag = None if dual is None else float(dual) * sparse.dual_scale
-            theta_value = sparse.theta
+        self.certified_, self.kkt_, self.solve_attempts_, self.support_ = None, None, (), None
+        self.solver_option_ = None
+        if self.solver_tolerance == "tight":
+            theta_value = self._tight_solve(data, grid_points_hal)
         else:
-            self.knot_aware_formulation_used_ = "dense" if self.objective_normalizer == "knot_aware" else None
-            problem, l1_constraint, theta_value = self._dense_problem(data, grid_points_hal)
-            solve_result = solve_cvxpy_problem(problem=problem, **solve_options)
-            self.objective_value_ = solve_result.objective_value
-            self.lambda_val_lag = l1_constraint.dual_value
-        self.solver_used_ = solve_result.solver_used
-        self.problem_status_ = solve_result.status
+            theta_value = self._default_solve(data, grid_points_hal)
 
         # Check if optimization was successful
         theta_raw = theta_value()
@@ -187,6 +177,77 @@ class CVXPYEstimator(BaseEstimator):
 
         return self
     
+    def _default_solve(self, data: pd.DataFrame, grid_points_hal: np.ndarray):
+        """solver_tolerance="default": the solvers' own tolerances, first acceptable status wins (v0.1.0)."""
+        structured = (
+            self.objective_normalizer == "knot_aware"
+            and self.basis_order in STRUCTURED_ORDERS
+            and self.knot_aware_formulation == "structured"
+        )
+        solve_options = dict(
+            primary_solver=self.solver,
+            use_secondary_solver=self.use_secondary_solver,
+            solver_waterfall=self.solver_waterfall,
+        )
+        solve_result = None
+        if structured:
+            # Sparse form of the same problem: no n x m basis is built
+            self.basis_names = create_basis_functions(
+                pd.DataFrame({'W1': [0.5]}), grid_points_hal, order=self.basis_order
+            )[1]
+            sparse = structured_problem(self._train_x, grid_points_hal, self.basis_order, self.n_grid_points,
+                                        self.norm_constraint)
+            try:
+                # only a fully converged solve; otherwise the dense form below, as before this formulation
+                solve_result = solve_cvxpy_problem(problem=sparse.problem, acceptable_statuses=("optimal",),
+                                                   **solve_options)
+            except RuntimeError:
+                solve_result = None
+        if solve_result is not None:
+            self.knot_aware_formulation_used_ = "structured"
+            self.objective_value_ = solve_result.objective_value * sparse.objective_scale
+            dual = sparse.l1_constraint.dual_value
+            self.lambda_val_lag = None if dual is None else float(dual) * sparse.dual_scale
+            theta_value = sparse.theta
+        else:
+            self.knot_aware_formulation_used_ = "dense" if self.objective_normalizer == "knot_aware" else None
+            problem, l1_constraint, theta_value = self._dense_problem(data, grid_points_hal)
+            solve_result = solve_cvxpy_problem(problem=problem, **solve_options)
+            self.objective_value_ = solve_result.objective_value
+            self.lambda_val_lag = l1_constraint.dual_value
+        self.solver_used_ = solve_result.solver_used
+        self.problem_status_ = solve_result.status
+        return theta_value
+
+
+    def _tight_solve(self, data: pd.DataFrame, grid_points_hal: np.ndarray):
+        """solver_tolerance="tight": one certified solve (haldensity.core.univariate.support.certified_solve)."""
+        problem = FullDataHALProblem(data, self.basis_order, self.n_grid_points, self.objective_normalizer,
+                                     self.max_knots, structured=self.knot_aware_formulation == "structured")
+        if not np.array_equal(problem.knots, grid_points_hal):
+            raise RuntimeError("internal error: the certified solve built different knots")
+        solvers = build_solver_sequence(self.solver, use_secondary_solver=self.use_secondary_solver,
+                                        solver_waterfall=self.solver_waterfall)
+        fit = certified_solve(problem, float(self.norm_constraint), tight_ladder(solvers), prune=self.tol)
+        self.basis_names = create_basis_functions(
+            pd.DataFrame({'W1': [0.5]}), grid_points_hal, order=self.basis_order
+        )[1]
+        self.knot_aware_formulation_used_ = fit.formulation if self.objective_normalizer == "knot_aware" else None
+        self.objective_value_ = fit.objective_value
+        self.lambda_val_lag = fit.dual_value
+        self.solver_used_, self.solver_option_ = fit.solver_used, fit.option
+        self.problem_status_ = fit.solver_status
+        self.certified_, self.kkt_, self.solve_attempts_, self.support_ = fit.certified, fit.kkt, fit.attempts, fit
+        if not fit.certified:
+            warnings.warn(
+                f"The fit at norm_constraint={self.norm_constraint} could not be certified by the optimality "
+                f"check (best of the solver ladder: {fit.kkt['n_kept_violating']} kept coefficients violate it, "
+                f"max ratio {fit.kkt['max_ratio']:.4g}); it is used anyway and certified_ is False.",
+                UserWarning,
+                stacklevel=3,
+            )
+        return lambda: fit.theta_raw
+
     def _dense_problem(self, data: pd.DataFrame, grid_points_hal: np.ndarray):
         """The problem with the n x m data basis (midpoint objective, and knot-aware for k >= 2)."""
         n_samples = len(data)
@@ -257,5 +318,12 @@ class CVXPYEstimator(BaseEstimator):
             "max_knots": self.max_knots,
             "n_candidate_knots": int(len(self._grid_points_hal)),
             "knot_aware_formulation_used": self.knot_aware_formulation_used_,
+            "solver_tolerance": self.solver_tolerance,
+            "solver_used": self.solver_used_,
+            "solver_option": self.solver_option_,
+            "problem_status": self.problem_status_,
+            "certified": self.certified_,
+            "kkt": self.kkt_,
+            "support_refit": self.support_,
         })
         return base

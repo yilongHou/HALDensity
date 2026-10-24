@@ -21,7 +21,8 @@ def data():
 
 @pytest.fixture(scope="module")
 def fit(data):
-    return CVXPYEstimator(norm_constraint=20.0, basis_order=1, log_frequency=-1).fit(data)
+    # a loosely solved fit (v0.1.0 solver settings): the SE basis comes from a separate refit
+    return CVXPYEstimator(norm_constraint=20.0, basis_order=1, log_frequency=-1, solver_tolerance="default").fit(data)
 
 
 @pytest.fixture(scope="module")
@@ -75,7 +76,8 @@ def test_cleaning_is_the_default_and_can_be_switched_off(data, fit, refit):
 
 
 def test_fits_without_an_l1_bound_use_the_original_basis(data, fit):
-    results = {k: v for k, v in fit.get_results().items() if k != "norm_constraint"}
+    # e.g. a penalized estimator: no L1 bound and no certified solution carried with the results
+    results = {k: v for k, v in fit.get_results().items() if k not in ("norm_constraint", "support_refit")}
     ci = density_confidence_interval(POINTS, results, estimate_covariance_beta(data, results, 1), 1)
     assert ci.attrs["basis"] == "original"
 

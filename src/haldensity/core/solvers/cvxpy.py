@@ -111,3 +111,40 @@ def solve_cvxpy_problem(
     raise RuntimeError(
         f"CVXPY optimization failed with solvers [{attempt_msg}]; details: {detail_msg}"
     ) from last_exception
+
+
+# Tight settings for the final fit at the chosen bound (CVXPYEstimator(solver_tolerance="tight") and
+# basis cleaning): per solver, the configurations tried in order. MOSEK's interior-point tolerances
+# (relative gap, primal and dual feasibility) are 1e-12; NEAR_REL = 1 stops MOSEK from reporting a
+# solution that only meets 1000 x those tolerances as "optimal", so such a stop shows up as
+# "optimal_inaccurate" (accept_unknown) and the optimality check decides whether it is good enough.
+MOSEK_TIGHT_PARAMS: dict[str, float] = {
+    "MSK_DPAR_INTPNT_CO_TOL_REL_GAP": 1e-12,
+    "MSK_DPAR_INTPNT_CO_TOL_PFEAS": 1e-12,
+    "MSK_DPAR_INTPNT_CO_TOL_DFEAS": 1e-12,
+    "MSK_DPAR_INTPNT_CO_TOL_NEAR_REL": 1.0,
+}
+TIGHT_STEPS: dict[str, tuple[tuple[str, str, dict[str, Any]], ...]] = {
+    "MOSEK": (("MOSEK", "tol 1e-12", dict(mosek_params=MOSEK_TIGHT_PARAMS, accept_unknown=True)),),
+    "CLARABEL": (
+        ("CLARABEL", "tol 1e-12", dict(tol_gap_abs=1e-12, tol_gap_rel=1e-12, tol_feas=1e-12, max_iter=400)),
+        ("CLARABEL", "tol 1e-10", dict(tol_gap_abs=1e-10, tol_gap_rel=1e-10, tol_feas=1e-10, max_iter=300)),
+    ),
+    "ECOS": (
+        ("ECOS", "tol 1e-12", dict(abstol=1e-12, reltol=1e-12, feastol=1e-12, max_iters=500)),
+        ("ECOS", "tol 1e-10", dict(abstol=1e-10, reltol=1e-10, feastol=1e-10, max_iters=300)),
+    ),
+    "SCS": (("SCS", "eps 1e-9", dict(eps_abs=1e-9, eps_rel=1e-9, max_iters=200000)),),
+}
+
+
+def tight_ladder(solvers: Iterable[str]) -> tuple[tuple[str, str, dict[str, Any]], ...]:
+    """The tight configurations of ``solvers`` in order (a solver without tight settings: its defaults)."""
+    steps: list[tuple[str, str, dict[str, Any]]] = []
+    for solver_name in solvers:
+        name = _normalize_solver_name(solver_name)
+        steps.extend(TIGHT_STEPS.get(name, ((name, "solver defaults", {}),)))
+    return tuple(steps)
+
+
+TIGHT_LADDER = tight_ladder(("MOSEK", "CLARABEL", "ECOS", "SCS"))

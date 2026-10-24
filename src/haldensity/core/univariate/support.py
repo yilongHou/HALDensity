@@ -13,7 +13,7 @@ objective normalizer, midpoint or knot-aware, on ``n_grid_points``; the fit's
 candidate knots; ``||theta[1:]||_1 <= M``; for knot-aware with k <= 1 the same
 structured form as the fit, from :mod:`haldensity.core.univariate.objective`),
 re-solves it at the selected M with tight
-tolerances (CLARABEL 1e-12, 1e-10; ECOS 1e-12, 1e-10; SCS 1e-9; first
+tolerances (MOSEK 1e-12; CLARABEL 1e-12, 1e-10; ECOS 1e-12, 1e-10; SCS 1e-9; first
 certified solution wins, else the least violating), prunes at 1e-4 and
 certifies the result with :func:`kkt_report`:
 
@@ -21,11 +21,20 @@ certifies the result with :func:`kkt_report`:
   with |theta_j| >= 0.1 max|theta| (the largest |gradient_j| if none);
 * a kept coordinate is violating when |gradient_j| < 0.99 lambda;
 * the support is certified when none is violating and no knot coordinate has
-  |gradient_j| > 1.01 lambda.
+  |gradient_j| > 1.01 lambda;
+* if the bound is not binding (||theta[1:]||_1 < (1 - 1e-4) M), lambda = 0 and
+  the solution is certified when max_j |gradient_j| / n <= 1e-5.
 
-Use the result only for the SE (``support_refit=`` of the functions in
-:mod:`haldensity.core.variance`); the point estimate stays the original fit. A
-refit that fails certification is kept and flagged (``certified=False``). The
+The same routine (:func:`certified_solve`, MOSEK 1e-12 first) is the final fit
+of ``CVXPYEstimator(solver_tolerance="tight")``, its default: there the
+certified solution is both the point estimate and the SE basis, and no
+separate refit is made.
+
+A separate refit (:func:`refit_support`, for a fit made with
+``solver_tolerance="default"``) is used only for the SE (``support_refit=`` of
+the functions in :mod:`haldensity.core.variance`); the point estimate stays that
+fit. A solution that fails certification is kept and flagged
+(``certified=False``). The
 cleaned support is a property of the optimization problem, not of the true
 density, and it is not unique (nearby knots give nearly the same function).
 
@@ -35,16 +44,18 @@ and ``kkt_report``.
 
 from __future__ import annotations
 
+import copy
 import warnings
 from dataclasses import dataclass, field
 from time import perf_counter
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import cvxpy as cp
 import numpy as np
 import pandas as pd
 
 from haldensity.core.basis.univariate import create_basis_functions
+from haldensity.core.solvers.cvxpy import TIGHT_LADDER
 from haldensity.core.univariate.objective import (
     STRUCTURED_ORDERS,
     candidate_knots,
@@ -53,74 +64,112 @@ from haldensity.core.univariate.objective import (
     structured_problem,
 )
 
-LADDER: tuple[tuple[str, str, dict[str, Any]], ...] = (
-    ("CLARABEL", "tol 1e-12", dict(tol_gap_abs=1e-12, tol_gap_rel=1e-12, tol_feas=1e-12, max_iter=400)),
-    ("CLARABEL", "tol 1e-10", dict(tol_gap_abs=1e-10, tol_gap_rel=1e-10, tol_feas=1e-10, max_iter=300)),
-    ("ECOS", "tol 1e-12", dict(abstol=1e-12, reltol=1e-12, feastol=1e-12, max_iters=500)),
-    ("ECOS", "tol 1e-10", dict(abstol=1e-10, reltol=1e-10, feastol=1e-10, max_iters=300)),
-    ("SCS", "eps 1e-9", dict(eps_abs=1e-9, eps_rel=1e-9, max_iters=200000)),
-)
+LADDER: tuple[tuple[str, str, dict[str, Any]], ...] = TIGHT_LADDER
 PRUNE = 1e-4
 RESIDUE_FLOOR = 1e-8
 KKT_SLACK = 0.99
 MAX_RATIO = 1.01
 BIG_FRACTION = 0.1
+ACTIVE_BOUND = 1e-4          # ||theta[1:]||_1 below (1 - this) * M: the bound is not binding
+SLACK_GRADIENT_TOL = 1e-5    # then certified when max |gradient_j| / n is at most this
 _OK_STATUSES = ("optimal", "optimal_inaccurate")
+
+
+@dataclass
+class BuiltProblem:
+    """A CVXPY problem for one bound; ``theta()`` gives HAL coefficients, the scales undo solver scaling."""
+
+    problem: cp.Problem
+    l1_constraint: cp.Constraint
+    theta: Callable[[], Optional[np.ndarray]]
+    formulation: str
+    objective_scale: float = 1.0
+    dual_scale: float = 1.0
 
 
 class FullDataHALProblem:
     """``CVXPYEstimator``'s optimization problem for one sample (same knots, cells and formulation)."""
 
     def __init__(self, data: pd.DataFrame, basis_order: int, n_grid_points: int = 200,
-                 objective_normalizer: str = "midpoint", max_knots: Optional[int] = None):
+                 objective_normalizer: str = "midpoint", max_knots: Optional[int] = None,
+                 structured: bool = True):
         self.x = np.asarray(data["W1"].dropna(), dtype=float)
         self.basis_order = int(basis_order)
         self.n = int(self.x.size)
         self.n_grid_points = int(n_grid_points)
         self.objective_normalizer = objective_normalizer
         self.knots = candidate_knots(self.x, max_knots)
-        self.structured = objective_normalizer == "knot_aware" and self.basis_order in STRUCTURED_ORDERS
+        self.structured = (bool(structured) and objective_normalizer == "knot_aware"
+                           and self.basis_order in STRUCTURED_ORDERS)
         self.terms = normalizer_terms(self.x, self.knots, self.basis_order, self.n_grid_points, objective_normalizer,
                                       build_basis=False)
 
-    def solve(self, norm_constraint: float, solver: str, options: dict[str, Any]) -> tuple[Optional[np.ndarray], str]:
-        if self.structured:
+    def build(self, norm_constraint: float, dense: bool = False) -> BuiltProblem:
+        """The problem at ``norm_constraint``: structured form when available (unless ``dense``)."""
+        if self.structured and not dense:
             sparse = structured_problem(self.x, self.knots, self.basis_order, self.n_grid_points, norm_constraint)
-            problem, value_of = sparse.problem, sparse.theta
+            return BuiltProblem(sparse.problem, sparse.l1_constraint, sparse.theta, "structured",
+                                sparse.objective_scale, sparse.dual_scale)
+        data_basis = create_basis_functions(pd.DataFrame({"W1": self.x}), self.knots, order=self.basis_order)[0]
+        terms = normalizer_terms(self.x, self.knots, self.basis_order, self.n_grid_points, self.objective_normalizer)
+        theta = cp.Variable(data_basis.shape[1])
+        data_log_density = data_basis @ theta
+        if terms.basis is not None:
+            cells = terms.basis @ theta
         else:
-            data_basis = create_basis_functions(pd.DataFrame({"W1": self.x}), self.knots, order=self.basis_order)[0]
-            grid_basis = normalizer_terms(self.x, self.knots, self.basis_order, self.n_grid_points,
-                                          self.objective_normalizer).basis
-            theta = cp.Variable(data_basis.shape[1])
-            loss = -cp.sum(data_basis @ theta) + self.n * cp.log_sum_exp(self.terms.log_widths + grid_basis @ theta)
-            problem = cp.Problem(cp.Minimize(loss), [cp.norm1(theta[1:]) <= float(norm_constraint)])
-            value_of = lambda: None if theta.value is None else theta.value  # noqa: E731
-        with warnings.catch_warnings():
-            # the ladder records each status and the optimality check decides; CVXPY's notice is noise here
-            warnings.filterwarnings("ignore", message="Solution may be inaccurate", category=UserWarning)
-            problem.solve(solver=solver, **options)
-        value = value_of()
-        return (None if value is None else np.asarray(value, dtype=float).copy()), str(problem.status)
+            # k = 0 knot-aware: the level on the cell starting at a knot is the data term's value there
+            parts = [theta[0:1]] if terms.leading_intercept_cell else []
+            if terms.data_rows.size:
+                parts.append(data_log_density[terms.data_rows])
+            cells = cp.hstack(parts) if len(parts) > 1 else parts[0]
+        loss = -cp.sum(data_log_density) + self.n * cp.log_sum_exp(terms.log_widths + cells)
+        l1 = cp.norm1(theta[1:]) <= float(norm_constraint)
+        problem = cp.Problem(cp.Minimize(loss), [l1])
+        return BuiltProblem(problem, l1, lambda: None if theta.value is None else theta.value, "dense")
+
+    def solve(self, norm_constraint: float, solver: str, options: dict[str, Any]) -> tuple[Optional[np.ndarray], str]:
+        built = self.build(norm_constraint)
+        _solve_quietly(built.problem, solver, options)
+        value = built.theta()
+        return (None if value is None else np.asarray(value, dtype=float).copy()), str(built.problem.status)
 
     def gradient(self, theta: np.ndarray) -> np.ndarray:
         """Gradient of the summed negative log-likelihood (the objective's own normalizer) at ``theta``."""
         return objective_gradient(theta, self.x, self.knots, self.basis_order, self.terms)
 
 
+def _solve_quietly(problem: cp.Problem, solver: str, options: dict[str, Any]) -> None:
+    with warnings.catch_warnings():
+        # the ladder records each status and the optimality check decides; CVXPY's notice is noise here
+        warnings.filterwarnings("ignore", message="Solution may be inaccurate", category=UserWarning)
+        problem.solve(solver=solver, **copy.deepcopy(options))
+
+
 def kkt_report(problem: FullDataHALProblem, theta: np.ndarray, prune: float = PRUNE,
-               slack: float = KKT_SLACK) -> dict[str, Any]:
+               slack: float = KKT_SLACK, norm_constraint: Optional[float] = None) -> dict[str, Any]:
     """Optimality diagnostics of a raw (unpruned) solution; see the module docstring."""
     k = problem.basis_order
     first = 1 if k == 0 else k + 1
     gradient = problem.gradient(theta)
     knot_gradient, knot_theta = gradient[first:], theta[first:]
     kept = np.abs(knot_theta) > prune
+    l1_raw = float(np.abs(theta[1:]).sum())
+    max_gradient = float(np.max(np.abs(gradient), initial=0.0)) / max(problem.n, 1)
+    if norm_constraint is not None and l1_raw < (1.0 - ACTIVE_BOUND) * float(norm_constraint):
+        # the bound is not binding: lambda = 0 and the whole gradient must vanish
+        return dict(
+            bound="slack", lambda_hat=0.0, n_knots=int(problem.knots.size), n_kept=int(kept.sum()),
+            n_kept_violating=0, n_residue=int(np.sum((np.abs(knot_theta) > RESIDUE_FLOOR) & ~kept)),
+            n_near_active=0, max_ratio=float("nan"), l1_raw=l1_raw, max_gradient_per_obs=max_gradient,
+            certified=bool(max_gradient <= SLACK_GRADIENT_TOL),
+        )
     big = kept & (np.abs(knot_theta) >= BIG_FRACTION * np.max(np.abs(knot_theta), initial=0.0))
     lam = float(np.median(np.abs(knot_gradient[big]))) if big.any() else float(np.max(np.abs(gradient[1:]), initial=0.0))
     ratio = np.abs(knot_gradient) / lam if lam > 0 else np.full(knot_gradient.shape, np.nan)
     violating = int(np.sum(kept & (ratio < slack)))
     max_ratio = float(np.nanmax(ratio)) if ratio.size and np.any(np.isfinite(ratio)) else float("nan")
     return dict(
+        bound="active" if norm_constraint is not None else "assumed active",
         lambda_hat=lam,
         n_knots=int(problem.knots.size),
         n_kept=int(kept.sum()),
@@ -128,7 +177,8 @@ def kkt_report(problem: FullDataHALProblem, theta: np.ndarray, prune: float = PR
         n_residue=int(np.sum((np.abs(knot_theta) > RESIDUE_FLOOR) & ~kept)),
         n_near_active=int(np.sum(ratio >= slack)),
         max_ratio=max_ratio,
-        l1_raw=float(np.abs(theta[1:]).sum()),
+        l1_raw=l1_raw,
+        max_gradient_per_obs=max_gradient,
         certified=bool(violating == 0 and (not np.isfinite(max_ratio) or max_ratio <= MAX_RATIO)),
     )
 
@@ -155,11 +205,78 @@ class SupportRefit:
     option: str
     seconds: float
     attempts: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    formulation: str = "dense"
+    objective_value: Optional[float] = None
+    dual_value: Optional[float] = None
 
     @property
     def n_selected(self) -> int:
         first = 1 if self.basis_order == 0 else self.basis_order + 1
         return int(np.count_nonzero(self.theta[first:]))
+
+
+def certified_solve(
+    problem: FullDataHALProblem,
+    norm_constraint: float,
+    ladder: tuple[tuple[str, str, dict[str, Any]], ...] = LADDER,
+    prune: float = PRUNE,
+) -> SupportRefit:
+    """Solve ``problem`` at ``norm_constraint`` down ``ladder`` until the optimality check certifies.
+
+    The first certified solution wins, else the least violating one. The problem is built once (the
+    structured form when available; the dense form only if no configuration returns a usable
+    solution of it). Every configuration tried is recorded in ``attempts``.
+    """
+    started = perf_counter()
+    attempts: list[dict[str, Any]] = []
+    best = None
+    forms = [False, True] if problem.structured else [True]
+    for dense in forms:
+        built = problem.build(norm_constraint, dense=dense)
+        for solver, label, options in ladder:
+            call: dict[str, Any] = dict(solver=solver, option=label, formulation=built.formulation)
+            began = perf_counter()
+            try:
+                _solve_quietly(built.problem, solver, options)
+            except Exception as exc:  # solver availability and failures vary by platform
+                attempts.append(dict(call, outcome=f"{type(exc).__name__}: {exc}"[:300], seconds=perf_counter() - began))
+                continue
+            status = str(built.problem.status)
+            call["status"] = status
+            theta = built.theta()
+            theta = None if theta is None else np.asarray(theta, dtype=float).copy()
+            if theta is None or not np.all(np.isfinite(theta)) or status not in _OK_STATUSES:
+                attempts.append(dict(call, outcome="no usable solution", seconds=perf_counter() - began))
+                continue
+            report = kkt_report(problem, theta, prune, norm_constraint=norm_constraint)
+            attempts.append(dict(call, outcome="solved", n_kept=report["n_kept"],
+                                 n_kept_violating=report["n_kept_violating"], max_ratio=report["max_ratio"],
+                                 bound=report["bound"], max_gradient_per_obs=report["max_gradient_per_obs"],
+                                 certified=report["certified"], seconds=perf_counter() - began))
+            closeness = abs(report["max_ratio"] - 1.0) if np.isfinite(report["max_ratio"]) else report["max_gradient_per_obs"]
+            rank = (not report["certified"], report["n_kept_violating"], closeness)
+            if best is None or rank < best[0]:
+                dual = built.l1_constraint.dual_value
+                best = (rank, solver, label, status, theta, report, built.formulation,
+                        float(built.problem.value) * built.objective_scale,
+                        None if dual is None else float(np.asarray(dual).ravel()[0]) * built.dual_scale)
+            if report["certified"]:
+                break
+        if best is not None:
+            break
+    if best is None:
+        raise RuntimeError(f"No solver configuration returned a usable solution: {attempts}")
+    _, solver, label, status, theta_raw, report, formulation, objective_value, dual_value = best
+    k = problem.basis_order
+    first = 1 if k == 0 else k + 1
+    theta = theta_raw.copy()
+    theta[first:] = np.where(np.abs(theta[first:]) > prune, theta[first:], 0.0)
+    return SupportRefit(
+        theta=theta, theta_raw=theta_raw, knots=problem.knots, basis_order=k,
+        norm_constraint=float(norm_constraint), certified=bool(report["certified"]), kkt=report,
+        solver_used=solver, solver_status=status, option=label, seconds=perf_counter() - started,
+        attempts=tuple(attempts), formulation=formulation, objective_value=objective_value, dual_value=dual_value,
+    )
 
 
 def refit_support(
@@ -174,44 +291,8 @@ def refit_support(
     prune: float = PRUNE,
 ) -> SupportRefit:
     """Re-solve the full-data HAL-MLE at ``norm_constraint`` with tight tolerances and certify the support."""
-    started = perf_counter()
     problem = FullDataHALProblem(data, basis_order, n_grid_points, objective_normalizer, max_knots)
-    attempts: list[dict[str, Any]] = []
-    best = None
-    for solver, label, options in ladder:
-        call: dict[str, Any] = dict(solver=solver, option=label)
-        began = perf_counter()
-        try:
-            theta, status = problem.solve(norm_constraint, solver, options)
-        except Exception as exc:  # solver availability and failures vary by platform
-            attempts.append(dict(call, outcome=f"{type(exc).__name__}: {exc}"[:300], seconds=perf_counter() - began))
-            continue
-        call["status"] = status
-        if theta is None or not np.all(np.isfinite(theta)) or status not in _OK_STATUSES:
-            attempts.append(dict(call, outcome="no usable solution", seconds=perf_counter() - began))
-            continue
-        report = kkt_report(problem, theta, prune)
-        attempts.append(dict(call, outcome="solved", n_kept=report["n_kept"],
-                             n_kept_violating=report["n_kept_violating"], max_ratio=report["max_ratio"],
-                             certified=report["certified"], seconds=perf_counter() - began))
-        rank = (not report["certified"], report["n_kept_violating"], abs(report["max_ratio"] - 1.0))
-        if best is None or rank < best[0]:
-            best = (rank, solver, label, status, theta, report)
-        if report["certified"]:
-            break
-    if best is None:
-        raise RuntimeError(f"No solver configuration returned a usable solution: {attempts}")
-    _, solver, label, status, theta_raw, report = best
-    k = int(basis_order)
-    first = 1 if k == 0 else k + 1
-    theta = theta_raw.copy()
-    theta[first:] = np.where(np.abs(theta[first:]) > prune, theta[first:], 0.0)
-    return SupportRefit(
-        theta=theta, theta_raw=theta_raw, knots=problem.knots, basis_order=k,
-        norm_constraint=float(norm_constraint), certified=bool(report["certified"]), kkt=report,
-        solver_used=solver, solver_status=status, option=label, seconds=perf_counter() - started,
-        attempts=tuple(attempts),
-    )
+    return certified_solve(problem, norm_constraint, ladder, prune)
 
 
 def refit_support_from_estimator(estimator: Any, data: pd.DataFrame, **kwargs: Any) -> SupportRefit:

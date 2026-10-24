@@ -1,11 +1,13 @@
 """Delta-method variance of the full-data HAL density and pointwise confidence intervals.
 
-Basis cleaning (on by default): the SE is computed on the cleaned basis of an accurately
-re-solved problem (:mod:`haldensity.core.univariate.support`) instead of the solver's pruned
-basis; the point estimate stays the original fit. ``support_refit="auto"`` (default) cleans
-whenever the results carry the fit's L1 bound (``CVXPYEstimator.get_results()``), computing the
-refit once per fit and reusing it in :func:`density_confidence_interval`; ``support_refit=None``
-uses the original basis; a :class:`SupportRefit` can also be passed explicitly.
+Basis cleaning (on by default): the SE is computed on the basis of an accurate, certified solution
+(:mod:`haldensity.core.univariate.support`) instead of a loosely solved fit's pruned basis.
+``support_refit="auto"`` (default): a ``CVXPYEstimator`` fit with ``solver_tolerance="tight"``
+(its default) already is that solution, and its own basis is used, so the point estimate and the
+SE share one solve; for other results that carry the fit's L1 bound (e.g. ``solver_tolerance=
+"default"``) the problem is re-solved tightly once per fit, cached and reused in
+:func:`density_confidence_interval`, and the point estimate stays the original fit.
+``support_refit=None`` uses the original basis; a :class:`SupportRefit` can also be passed.
 """
 
 from collections import OrderedDict
@@ -53,7 +55,14 @@ def _refit_key(estimation_results: dict, basis_order: int) -> Optional[tuple]:
 
 
 def _auto_refit(data: pd.DataFrame, estimation_results: dict, basis_order: int) -> Optional[SupportRefit]:
-    """The cleaned basis of this fit (computed once and cached), or None if the fit has no L1 bound."""
+    """The cleaned basis of this fit, or None if the fit has no L1 bound.
+
+    A fit made with ``solver_tolerance="tight"`` carries its certified solution (``support_refit``),
+    which is used as it is; otherwise the problem is re-solved tightly once and cached.
+    """
+    carried = estimation_results.get('support_refit')
+    if isinstance(carried, SupportRefit):
+        return carried
     key = _refit_key(estimation_results, basis_order)
     if key is None:
         return None
@@ -247,8 +256,10 @@ def density_confidence_interval(
         if isinstance(cov_beta, BasisCovariance):
             support_refit = cov_beta.support_refit       # the basis the covariance was computed on
         else:
+            carried = estimation_results.get('support_refit')
             key = _refit_key(estimation_results, basis_order)
-            cached = _REFIT_CACHE.get(key) if key is not None else None
+            cached = carried if isinstance(carried, SupportRefit) else (
+                _REFIT_CACHE.get(key) if key is not None else None)
             size = cov_beta.shape[0]
             if cached is not None and _selection_size(cached.theta, basis_order) == size:
                 support_refit = cached

@@ -79,6 +79,7 @@ class OptunaHyperparameterTuner:
         param_overrides: Optional[dict[str, Any]] = None,
         estimator_kwargs: Optional[dict[str, Any]] = None,
         cv_scoring: str = "exact",
+        cv_solver_tolerance: str = "default",
         use_conservative_adjustment: Union[bool, str] = "auto",
         conservative_selection_rule: str = TUNER_DEFAULTS.conservative_selection_rule,
         conservative_k_percent: float = TUNER_DEFAULTS.conservative_k_percent,
@@ -119,6 +120,11 @@ class OptunaHyperparameterTuner:
                 "interpolated": the pre-0.2.0 score, linear interpolation of get_density()
                 on its 200-point grid with a 1e-10 floor. Fully old behaviour also needs
                 estimator_kwargs={"normalizer": "midpoint"}.
+            cv_solver_tolerance: `solver_tolerance` of the CVXPYEstimator fits in the CV folds (the
+                search and the conservative adjustment). "default" (default): the solvers' own
+                tolerances; the final fit in fit_best_model() uses the estimator's setting (its
+                default "tight": MOSEK 1e-12 and a certified solution). "tight" makes the folds tight
+                too. A `solver_tolerance` in estimator_kwargs applies to the final fit only.
             use_conservative_adjustment: After the CV search, move to the smallest bound
                 (norm_constraint) whose mean CV log-likelihood is at least the threshold below the
                 best (haldensity.core.cv.conservative; bracketing then bisection in log M), as the
@@ -159,6 +165,9 @@ class OptunaHyperparameterTuner:
         self.param_overrides: dict[str, Any] = param_overrides or {}
         self.estimator_kwargs: dict[str, Any] = dict(estimator_kwargs or {})
         self.cv_scoring = cv_scoring
+        if cv_solver_tolerance not in ("tight", "default"):
+            raise ValueError(f"cv_solver_tolerance must be 'tight' or 'default', got {cv_solver_tolerance!r}")
+        self.cv_solver_tolerance = cv_solver_tolerance
         if not (isinstance(use_conservative_adjustment, bool) or use_conservative_adjustment == "auto"):
             raise ValueError("use_conservative_adjustment must be True, False or 'auto'")
         self.use_conservative_adjustment = use_conservative_adjustment
@@ -493,7 +502,10 @@ class OptunaHyperparameterTuner:
                 
                 # Create and fit estimator. CVXPY's "Solution may be inaccurate" notice is noise in
                 # the search (the status is recorded on the estimator); the final fit still shows it.
-                estimator = self.estimator_class(**params)
+                fold_params = params
+                if self.estimator_name == "CVXPYEstimator":
+                    fold_params = {**params, "solver_tolerance": self.cv_solver_tolerance}
+                estimator = self.estimator_class(**fold_params)
                 with warnings.catch_warnings():
                     warnings.filterwarnings("ignore", message="Solution may be inaccurate", category=UserWarning)
                     estimator.fit(train_data)
@@ -760,6 +772,7 @@ class OptunaHyperparameterTuner:
                 "cv_folds": self.cv_folds,
                 "metric": self.metric,
                 "cv_scoring": self.cv_scoring,
+                "cv_solver_tolerance": self.cv_solver_tolerance,
                 "n_trials": len(self.study.trials),
                 "random_state": self.random_state
             },

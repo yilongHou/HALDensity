@@ -29,7 +29,8 @@ def test_default_reproduces_the_pre_option_problem_bit_for_bit(data):
         loss = -cp.sum(b_ik @ theta) + len(data) * cp.log_sum_exp(np.log(grid[1:] - grid[:-1]) + b_jk @ theta)
         problem = cp.Problem(cp.Minimize(loss), [cp.norm1(theta[1:]) <= 5.0])
         solve_cvxpy_problem(problem=problem, primary_solver="ECOS", use_secondary_solver=False)
-        fit = CVXPYEstimator(norm_constraint=5.0, basis_order=k, max_knots=None, **ECOS).fit(data)
+        fit = CVXPYEstimator(norm_constraint=5.0, basis_order=k, max_knots=None, solver_tolerance="default",
+                             **ECOS).fit(data)
         np.testing.assert_array_equal(fit.optimized_theta_raw, theta.value)
 
 

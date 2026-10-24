@@ -28,9 +28,9 @@ CASES = [
 ]
 
 
-def _fit(data, k, M, K, formulation):
+def _fit(data, k, M, K, formulation, solver_tolerance="default"):
     fit = CVXPYEstimator(norm_constraint=M, basis_order=k, log_frequency=-1, objective_normalizer="knot_aware",
-                         max_knots=K)
+                         max_knots=K, solver_tolerance=solver_tolerance)
     fit.knot_aware_formulation = formulation
     return fit.fit(data)
 
@@ -84,6 +84,24 @@ def test_structured_failure_falls_back_to_the_dense_form(monkeypatch):
     fit = _fit(data, 1, 50.0, None, "structured")
     assert fit.knot_aware_formulation_used_ == "dense"
     assert fit.get_results()["knot_aware_formulation_used"] == "dense"
+
+
+def test_tight_fit_falls_back_to_the_dense_form(monkeypatch):
+    import haldensity.core.univariate.support as support
+
+    real = support.FullDataHALProblem.build
+
+    def no_structured_solution(self, norm_constraint, dense=False):
+        built = real(self, norm_constraint, dense=dense)
+        if built.formulation == "structured":
+            built.theta = lambda: None
+        return built
+
+    monkeypatch.setattr(support.FullDataHALProblem, "build", no_structured_solution)
+    data = pd.DataFrame({"W1": np.random.default_rng(1).beta(2.0, 5.0, size=150)})
+    fit = _fit(data, 1, 20.0, None, "structured", solver_tolerance="tight")
+    assert fit.knot_aware_formulation_used_ == "dense" and fit.certified_
+    assert {a["formulation"] for a in fit.solve_attempts_} == {"structured", "dense"}
 
 
 @pytest.mark.parametrize("k,normalizer", [(0, "knot_aware"), (1, "knot_aware"), (1, "midpoint"), (2, "knot_aware")])

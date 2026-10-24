@@ -75,6 +75,26 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   Gaussian mixture, n = 400 and 1,280, k = 1 and 2): basis 1,121-1,257 -> 5-33 functions at
   n = 1,280; mean SE / Monte Carlo sd 1.11-2.76 -> 0.80-1.25; coverage of the truth 85-100%
   (median 100%) -> 83-99% (median 94%).
+- The final fit is one tight, certified solve (`CVXPYEstimator(solver_tolerance="tight")`, the
+  new default): MOSEK with interior-point tolerances 1e-12 (relative gap, primal and dual
+  feasibility), then CLARABEL 1e-12/1e-10, ECOS 1e-12/1e-10, SCS 1e-9 (`haldensity.core.solvers.
+  TIGHT_LADDER`, following `solver` / `solver_waterfall`); each solution is pruned at `tol` (1e-4)
+  and checked against the optimality conditions, the first certified one is kept, else the least
+  violating with a warning. That solution is the point estimate and its basis the SE basis
+  (`estimate_covariance_beta` uses it directly, no separate refit). `certified_`, `kkt_`,
+  `solve_attempts_`, `solver_option_` and `get_results()` record solver, status and the check.
+  **Point estimates change slightly from v0.1.0**: on the 18 fixed fits of the restructure check
+  (CLARABEL, no MOSEK) theta by at most 3.5e-4 and the density by at most 1.8e-4; on 32 fits (n =
+  200 and 1,000, k = 0-2, midpoint and knot-aware, two bounds each) by at most 2.7% relative (MOSEK)
+  or 8.4% (free solvers), apart from k = 0 midpoint cells the objective does not see, which it leaves
+  unidentified. All 32 were certified; MOSEK alone certified 24 and stopped short of 1e-12 (status
+  "optimal_inaccurate", MOSEK's near-optimal stop made visible) in 19. Without MOSEK the final fit
+  equals the previous fit + cleaning refit bit for bit. Cost: about the old fit + refit; at n =
+  1,000, 0.6-0.8 s when MOSEK certifies, 2-6 s when CLARABEL or ECOS has to. CV folds keep the
+  solvers' own tolerances (`OptunaHyperparameterTuner(cv_solver_tolerance="default")`); the old
+  final fit is `solver_tolerance="default"` (bit for bit). The optimality check now also handles a
+  bound that is not binding (lambda = 0: certified when max |gradient| / n <= 1e-5), and basis
+  cleaning of `solver_tolerance="default"` fits starts with MOSEK 1e-12 as well.
 - `haldensity.rc.fit_right_censored(method=...)` and `fit_ipcw_hal`, `fit_l1mle_m1`,
   `fit_cvl1mle` (default method), `fit_undersmoothed`: the four right-censored point estimators
   with the same inputs and outputs (`RightCensoredPointEstimate`).
