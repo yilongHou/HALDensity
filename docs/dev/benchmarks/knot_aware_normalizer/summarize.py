@@ -19,9 +19,16 @@ LABEL = {"A": "A midpoint, all knots", "B": "B knot-aware, all knots", "D": "D k
          **{f"C{K}": f"C knot-aware, K = {K}" for K in (100, 250, 500, 1000)}}
 
 
+def _lines(path: Path):
+    import gzip
+    if not path.exists() and path.with_suffix(path.suffix + ".gz").exists():
+        return gzip.open(path.with_suffix(path.suffix + ".gz"), "rt")
+    return open(path)
+
+
 def load(out: Path):
-    fits = pd.DataFrame([json.loads(line) for line in open(out / "fits.jsonl")])
-    cv = [json.loads(line) for line in open(out / "cv.jsonl")]
+    fits = pd.DataFrame([json.loads(line) for line in _lines(out / "fits.jsonl")])
+    cv = [json.loads(line) for line in _lines(out / "cv.jsonl")]
     bounds = json.loads((out / "bounds.json").read_text())
     fits["exceeded"] = fits["status"].astype(str).str.startswith("exceeded")
     fits["error"] = fits["status"].astype(str).str.startswith(("error", "no output"))
@@ -107,6 +114,24 @@ def solver_table(fits: pd.DataFrame) -> str:
     return md(t)
 
 
+def violation_table(fits: pd.DataFrame) -> str:
+    ok = fits[~fits.exceeded & ~fits.error].copy()
+    ok["uncertified"] = ~ok.certified.astype(bool)
+    t = ok.groupby(["k", "config", "n"], observed=True).agg(fits=("n", "size"), uncertified=("uncertified", "sum"))
+    bad = ok[ok.uncertified]
+    if not len(bad):
+        return "All fits certified."
+    v = bad.groupby(["k", "config", "n"], observed=True).agg(
+        M_factors=("M_factor", lambda x: ",".join(map(str, sorted(set(x))))),
+        kept_below_lambda=("viol_low", "median"), their_l1_share=("viol_low_l1_share", "median"),
+        max_l1_share=("viol_low_l1_share", "max"), missing=("viol_high", "median"), max_ratio=("kkt_max_ratio", "max"))
+    t = t.join(v, how="inner").reset_index()
+    return ("Uncertified final fits (ladder MOSEK -> CLARABEL -> ECOS, no SCS) and their KKT violations (medians over "
+            "the uncertified fits): kept_below_lambda = kept coefficients with |gradient| < 0.99 lambda (should be "
+            "zero); their_l1_share = their share of ||theta[1:]||_1; missing = coefficients with |gradient| > 1.01 "
+            "lambda\n\n" + md(t))
+
+
 def cv_shape(cv: list) -> tuple[str, pd.DataFrame]:
     rows = []
     for r in cv:
@@ -157,11 +182,17 @@ def figures(fits: pd.DataFrame, cv_mean: pd.DataFrame, out: Path) -> None:
                 g = cv_mean[(cv_mean.k == k) & (cv_mean.truth == truth) & (cv_mean.n == n) & (cv_mean.config == config)]
                 if len(g):
                     ax.plot(g.M, g.score, marker=".", label=LABEL[config])
+            others = cv_mean[(cv_mean.k == k) & (cv_mean.truth == truth) & (cv_mean.n == n) & (cv_mean.config != "A")]
+            if len(others):                       # scale to the knot-aware curves; A may run off the bottom
+                lo, hi = others.score.min(), others.score.max()
+                ax.set_ylim(lo - 0.15 * (hi - lo), hi + 0.1 * (hi - lo))
             ax.set(xscale="log", title=f"k = {k}, {truth}, n = {n}", xlabel="M")
             ax.grid(alpha=0.3)
             if col == 0:
                 ax.set_ylabel("5-fold CV log-likelihood (mean of 3 seeds)")
-    axes[0, 3].legend(fontsize=7)
+    axes[1, 3].legend(fontsize=7)
+    fig.suptitle("Exact-score 5-fold CV log-likelihood vs M (mean of 3 seeds); y-axis fitted to the knot-aware curves, "
+                 "so the midpoint curve (A) leaves the panel where it collapses", fontsize=9)
     fig.tight_layout()
     fig.savefig(out / "cv_curves.png", dpi=130)
     plt.close(fig)
@@ -177,7 +208,7 @@ def main() -> None:
         f"Bounds M (best 3-seed mean CV score of config B at n = 1,000): {json.dumps(bounds)}", "",
         f"Fits: {len(fits)}; exceeded a cap: {int(fits.exceeded.sum())}; errors: {int(fits.error.sum())}.", "",
         "## Time and memory", "", cost_tables(fits), "", "Where each configuration first exceeds 10 min or 16 GB per fit:", "",
-        thresholds(fits), "", "## Solver ladder (final fits, solver_tolerance=\"tight\")", "", solver_table(fits), "",
+        thresholds(fits), "", "## Solver ladder (final fits, solver_tolerance=\"tight\")", "", solver_table(fits), "", violation_table(fits), "",
         "## Accuracy at the CV bound vs n", "", l2_vs_n(fits), "",
         "## Accuracy and spike diagnostics vs K and M", "", accuracy_tables(fits), "",
         "## CV curves (exact held-out score; drop = nats below the peak)", "", cv_text, "",

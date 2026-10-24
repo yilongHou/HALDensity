@@ -79,7 +79,8 @@ Status: reference list, 2026-10-24. Each item says what was decided, when, and w
 
 ## 8. Pending decisions
 
-- Defaults for the knot-aware objective normalizer and the knot cap K (after the benchmark).
+- Defaults for the knot-aware objective normalizer and the knot cap K: benchmark done 2026-10-24, recommendation knot-aware with K = 1,000 ([benchmarks/knot_aware_normalizer/](benchmarks/knot_aware_normalizer/README.md)); awaiting Yilong.
+- Final fit at large n: cap the SCS step at 600 s; no zero-and-recheck rule; what to do with the SE of an uncertified fit ([benchmarks/final_fit_repair/](benchmarks/final_fit_repair/README.md)); awaiting Yilong.
 - Whether a CV safeguard is needed for k ≥ 1 once the objective sees spikes (paired-difference rule as the candidate).
 - Accurate normalizer for the censored-data estimators (RC project handoff).
 - A package default for the order k (theory suggests k = 2; Phase B and the paper-version simulation decide).
