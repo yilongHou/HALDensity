@@ -48,7 +48,9 @@ def test_kkt_report_flags_a_kept_coefficient_off_the_active_set(data, refit):
 
 def test_cleaned_se_keeps_the_point_estimate(data, fit, refit):
     results = fit.get_results()
-    original = density_confidence_interval(POINTS, results, estimate_covariance_beta(data, results, 1), 1)
+    original = density_confidence_interval(
+        POINTS, results, estimate_covariance_beta(data, results, 1, support_refit=None), 1, support_refit=None
+    )
     cleaned = density_confidence_interval(
         POINTS, results, estimate_covariance_beta(data, results, 1, support_refit=refit), 1, support_refit=refit
     )
@@ -58,10 +60,31 @@ def test_cleaned_se_keeps_the_point_estimate(data, fit, refit):
     assert original.attrs["basis"] == "original"
 
 
+def test_cleaning_is_the_default_and_can_be_switched_off(data, fit, refit):
+    results = fit.get_results()
+    default = density_confidence_interval(POINTS, results, estimate_covariance_beta(data, results, 1), 1)
+    explicit = density_confidence_interval(
+        POINTS, results, estimate_covariance_beta(data, results, 1, support_refit=refit), 1, support_refit=refit
+    )
+    assert default.attrs["basis"] == "cleaned"
+    np.testing.assert_allclose(default["se"], explicit["se"], rtol=1e-10)
+
+    # a covariance on the original basis gets the original-basis SE, not a mismatched one
+    off = density_confidence_interval(POINTS, results, estimate_covariance_beta(data, results, 1, support_refit=None), 1)
+    assert off.attrs["basis"] == "original"
+
+
+def test_fits_without_an_l1_bound_use_the_original_basis(data, fit):
+    results = {k: v for k, v in fit.get_results().items() if k != "norm_constraint"}
+    ci = density_confidence_interval(POINTS, results, estimate_covariance_beta(data, results, 1), 1)
+    assert ci.attrs["basis"] == "original"
+
+
 def test_mismatched_inputs_are_rejected(data, fit, refit):
     results = fit.get_results()
     with pytest.raises(ValueError, match="compute it with the same support_refit"):
-        density_confidence_interval(POINTS, results, estimate_covariance_beta(data, results, 1), 1, support_refit=refit)
+        density_confidence_interval(POINTS, results, estimate_covariance_beta(data, results, 1, support_refit=None), 1,
+                                    support_refit=refit)
     other = pd.DataFrame({"W1": np.random.default_rng(5).beta(2.0, 5.0, size=200)})
     with pytest.raises(ValueError, match="do not match the estimator's knots"):
         refit_support_from_estimator(fit, other)
@@ -70,3 +93,14 @@ def test_mismatched_inputs_are_rejected(data, fit, refit):
 def test_k0_refit_runs(data):
     refit = refit_support(data, basis_order=0, norm_constraint=5.0)
     assert refit.basis_order == 0 and refit.theta.size == 1 + np.unique(data["W1"]).size
+
+
+def test_covariance_carries_its_basis(data, fit):
+    results = fit.get_results()
+    cleaned_cov = estimate_covariance_beta(data, results, 1)
+    original_cov = estimate_covariance_beta(data, results, 1, support_refit=None)
+    assert cleaned_cov.support_refit is not None and original_cov.support_refit is None
+    # even if both bases had the same size, the pairing follows the covariance, not the size
+    assert density_confidence_interval(POINTS, results, original_cov, 1).attrs["basis"] == "original"
+    assert density_confidence_interval(POINTS, results, cleaned_cov, 1).attrs["basis"] == "cleaned"
+    assert density_confidence_interval(POINTS, results, np.asarray(original_cov), 1).attrs["basis"] == "original"

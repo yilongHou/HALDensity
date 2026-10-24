@@ -46,13 +46,15 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   spikes disappear and the 5-fold CV log-likelihood declines gradually past its peak (M = 5-23)
   instead of collapsing. Fit time 1.1-1.4x (n = 300) to 1.7-2.5x (n = 1,280). Default unchanged
   ("midpoint"); see `docs/dev/cvll-multicollinearity`.
-- Optional basis cleaning before the delta-method SE (`haldensity.core.univariate.support`):
-  `refit_support_from_estimator(fit, data)` re-solves the full-data problem at the selected bound
-  with tight tolerances (CLARABEL 1e-12/1e-10, ECOS 1e-12/1e-10, SCS 1e-9), prunes at 1e-4 and
-  certifies the support by the optimality conditions; pass it as `support_refit=` to
-  `estimate_covariance_beta` and `density_confidence_interval`. The point estimate stays the
-  original fit; an uncertified refit is kept and flagged (`result.attrs["basis_certified"]`).
-  Off by default (decision pending). With MOSEK, 100 replicates per setting (truncated normal and
+- Basis cleaning before the delta-method SE, on by default (`haldensity.core.univariate.support`):
+  the full-data problem is re-solved at the fit's bound with tight tolerances (CLARABEL
+  1e-12/1e-10, ECOS 1e-12/1e-10, SCS 1e-9), pruned at 1e-4 and certified by the optimality
+  conditions, and `estimate_covariance_beta` / `density_confidence_interval` compute the SE on that
+  basis (`support_refit="auto"`; the refit is computed once per fit, and the covariance carries its
+  basis so the CI uses the same one). The point estimate stays the original fit; an uncertified
+  refit is kept, warned about and flagged (`result.attrs["basis_certified"]`). `support_refit=None`
+  uses the original basis; fits without an L1 bound (penalty-tuned estimators) always do.
+  `CVXPYEstimator.get_results()` now includes `norm_constraint` and `n_grid_points`. With MOSEK, 100 replicates per setting (truncated normal and
   Gaussian mixture, n = 400 and 1,280, k = 1 and 2): basis 1,121-1,257 -> 5-33 functions at
   n = 1,280; mean SE / Monte Carlo sd 1.11-2.76 -> 0.80-1.25; coverage of the truth 85-100%
   (median 100%) -> 83-99% (median 94%).

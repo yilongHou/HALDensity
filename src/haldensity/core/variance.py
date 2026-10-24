@@ -1,12 +1,15 @@
 """Delta-method variance of the full-data HAL density and pointwise confidence intervals.
 
-Optional basis cleaning: pass ``support_refit=refit_support_from_estimator(fit, data)``
-(:mod:`haldensity.core.univariate.support`) to compute the SE on the cleaned basis of an
-accurately solved problem instead of the solver's pruned basis. The point estimate stays the
-original fit.
+Basis cleaning (on by default): the SE is computed on the cleaned basis of an accurately
+re-solved problem (:mod:`haldensity.core.univariate.support`) instead of the solver's pruned
+basis; the point estimate stays the original fit. ``support_refit="auto"`` (default) cleans
+whenever the results carry the fit's L1 bound (``CVXPYEstimator.get_results()``), computing the
+refit once per fit and reusing it in :func:`density_confidence_interval`; ``support_refit=None``
+uses the original basis; a :class:`SupportRefit` can also be passed explicitly.
 """
 
-from typing import Optional
+from collections import OrderedDict
+from typing import Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -15,7 +18,66 @@ from scipy.stats import norm
 import warnings
 
 from haldensity.core.basis.univariate import create_basis_functions
-from haldensity.core.univariate.support import SupportRefit
+from haldensity.core.univariate.support import SupportRefit, refit_support
+
+SupportRefitArg = Union[SupportRefit, None, str]
+_REFIT_CACHE: "OrderedDict[tuple, SupportRefit]" = OrderedDict()
+_REFIT_CACHE_SIZE = 16
+
+
+class BasisCovariance(np.ndarray):
+    """Cov(beta-hat) that remembers its basis: ``support_refit`` (None = the original basis).
+
+    Behaves as a plain array; :func:`density_confidence_interval` reads ``support_refit`` so the SE
+    uses the same basis as the covariance.
+    """
+
+    support_refit: Optional[SupportRefit] = None
+
+    def __array_finalize__(self, obj):
+        self.support_refit = getattr(obj, "support_refit", None)
+
+
+def _refit_key(estimation_results: dict, basis_order: int) -> Optional[tuple]:
+    if estimation_results.get('norm_constraint') is None:
+        return None
+    return (
+        np.asarray(estimation_results['theta_hat'], dtype=float).tobytes(),
+        np.asarray(estimation_results['data_points'], dtype=float).tobytes(),
+        int(basis_order),
+        float(estimation_results['norm_constraint']),
+        int(estimation_results.get('n_grid_points', 200)),
+    )
+
+
+def _auto_refit(data: pd.DataFrame, estimation_results: dict, basis_order: int) -> Optional[SupportRefit]:
+    """The cleaned basis of this fit (computed once and cached), or None if the fit has no L1 bound."""
+    key = _refit_key(estimation_results, basis_order)
+    if key is None:
+        return None
+    if key not in _REFIT_CACHE:
+        refit = refit_support(data, int(basis_order), float(estimation_results['norm_constraint']),
+                              n_grid_points=int(estimation_results.get('n_grid_points', 200)))
+        knots = np.unique(np.asarray(estimation_results['data_points'], dtype=float))
+        if not np.array_equal(refit.knots, knots):
+            raise ValueError("data do not match the fit's knots; pass the data the estimator was fitted on")
+        if not refit.certified:
+            warnings.warn(
+                f"Basis cleaning could not certify the support (best of the solver ladder: "
+                f"{refit.kkt['n_kept_violating']} kept coefficients violate the optimality check); the SE "
+                "uses it anyway and result.attrs['basis_certified'] is False.",
+                UserWarning,
+                stacklevel=3,
+            )
+        _REFIT_CACHE[key] = refit
+        while len(_REFIT_CACHE) > _REFIT_CACHE_SIZE:
+            _REFIT_CACHE.popitem(last=False)
+    _REFIT_CACHE.move_to_end(key)
+    return _REFIT_CACHE[key]
+
+
+def _selection_size(theta_full: np.ndarray, basis_order: int) -> int:
+    return int(basis_order + 1 + np.count_nonzero(np.asarray(theta_full)[basis_order + 1:]))
 
 
 def _theta_for_se(estimation_results: dict, support_refit: Optional[SupportRefit]) -> np.ndarray:
@@ -33,12 +95,17 @@ def estimate_covariance_beta(
     estimation_results: dict,
     basis_order: int,
     ridge_param: float = 1e-6,
-    support_refit: Optional[SupportRefit] = None,
+    support_refit: SupportRefitArg = "auto",
 ) -> np.ndarray:
     """Estimate Cov(β̂) via observed Fisher information with ridge regularization.
 
-    With ``support_refit``, the selected basis and coefficients are the cleaned ones.
+    ``support_refit="auto"`` (default) uses the cleaned basis when the results carry the fit's
+    L1 bound; ``None`` uses the original basis; a :class:`SupportRefit` is used as given.
     """
+    if isinstance(support_refit, str):
+        if support_refit != "auto":
+            raise ValueError("support_refit must be 'auto', None or a SupportRefit")
+        support_refit = _auto_refit(data, estimation_results, basis_order)
     theta_hat_full = _theta_for_se(estimation_results, support_refit)
     original_data_points = np.array(estimation_results['data_points'])
     grid_points_hal_original = np.unique(original_data_points)
@@ -97,7 +164,9 @@ def estimate_covariance_beta(
         warnings.warn("Information matrix is singular. Using pseudo-inverse.")
         covariance_matrix = np.linalg.pinv(regularized_information) / n_samples
 
-    return covariance_matrix
+    covariance = covariance_matrix.view(BasisCovariance)
+    covariance.support_refit = support_refit
+    return covariance
 
 
 def _evaluation_pieces(
@@ -157,16 +226,30 @@ def density_confidence_interval(
     cov_beta: np.ndarray,
     basis_order: int,
     alpha: float = 0.05,
-    support_refit: Optional[SupportRefit] = None,
+    support_refit: SupportRefitArg = "auto",
 ) -> pd.DataFrame:
     """Compute delta-method CIs for density at x_values.
 
-    With ``support_refit`` (from :func:`haldensity.core.univariate.support.refit_support`), the SE
-    is computed on the cleaned basis and ``cov_beta`` must come from
-    ``estimate_covariance_beta(..., support_refit=support_refit)``; the ``density`` column stays
-    the original fit. ``result.attrs`` records the basis used and whether it was certified.
+    The SE uses the same basis as ``cov_beta``: with ``support_refit="auto"`` (default) the
+    cleaned basis computed by :func:`estimate_covariance_beta` for this fit if ``cov_beta`` has its
+    size, else the original basis; ``None`` forces the original basis; a :class:`SupportRefit`
+    is used as given. The ``density`` column is always the original fit. ``result.attrs`` records
+    the basis used and whether it was certified.
     """
     original_theta = np.array(estimation_results['theta_hat'])
+    if isinstance(support_refit, str):
+        if support_refit != "auto":
+            raise ValueError("support_refit must be 'auto', None or a SupportRefit")
+        if isinstance(cov_beta, BasisCovariance):
+            support_refit = cov_beta.support_refit       # the basis the covariance was computed on
+        else:
+            key = _refit_key(estimation_results, basis_order)
+            cached = _REFIT_CACHE.get(key) if key is not None else None
+            size = cov_beta.shape[0]
+            if cached is not None and _selection_size(cached.theta, basis_order) == size:
+                support_refit = cached
+            else:
+                support_refit = None
     knots = np.unique(np.array(estimation_results['data_points']))
     n_grid_points = len(estimation_results.get('grid_points', np.linspace(0, 1, 200)))
     x_values = np.clip(x_values, 0, 1)

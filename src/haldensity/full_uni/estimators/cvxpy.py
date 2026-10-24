@@ -189,5 +189,7 @@ class CVXPYEstimator(BaseEstimator):
         base.update({
             "lambda_val_lag": self.lambda_val_lag,
             "optimized_theta_raw": self.optimized_theta_raw,
+            "norm_constraint": float(self.norm_constraint),
+            "n_grid_points": int(self.n_grid_points),
         })
         return base
