@@ -31,6 +31,7 @@ class CVXPYEstimator(BaseEstimator):
         use_secondary_solver: bool = True,
         solver_waterfall: list[str] = ["MOSEK", "CLARABEL", "ECOS", "SCS"],
         normalizer: str = "gauss_legendre",
+        objective_normalizer: str = "midpoint",
     ):
         """
         Initialize CVXPY estimator.
@@ -40,7 +41,17 @@ class CVXPYEstimator(BaseEstimator):
             norm_constraint: One-norm constraint for theta[1:]
             n_grid_points: Number of grid points for density evaluation
             solver: CVXPY solver to use (default: "MOSEK")
+            normalizer: how the fitted density is normalized when evaluated (see BaseEstimator)
+            objective_normalizer: the normalizer inside the fitting objective.
+                "midpoint" (default): midpoint rule on the n_grid_points - 1 equal cells.
+                "exact" (basis_order = 0 only): the exact integral of the piecewise-constant
+                exp(f), one term per cell between consecutive candidate knots, so a spike
+                between two close knots is not invisible to the objective.
         """
+        if objective_normalizer not in ("midpoint", "exact"):
+            raise ValueError(f"objective_normalizer must be 'midpoint' or 'exact', got {objective_normalizer!r}")
+        if objective_normalizer == "exact" and basis_order != 0:
+            raise ValueError("objective_normalizer='exact' is implemented for basis_order=0 only")
         super().__init__(
             normalizer=normalizer,
             tol=tol,
@@ -51,6 +62,7 @@ class CVXPYEstimator(BaseEstimator):
         self.norm_constraint = norm_constraint
         self.n_grid_points = n_grid_points
         self.solver = solver
+        self.objective_normalizer = objective_normalizer
         
         # Internal, non-standard attributes for inspection
         self.optimized_theta_raw: Optional[np.ndarray] = None
@@ -98,8 +110,16 @@ class CVXPYEstimator(BaseEstimator):
         # Data log-density at the data points and at the evaluation grid
         # Since our basis includes the intercept, we use the full basis @ theta
         first_term = -cp.sum(b_ik @ theta)
-        delta_j = grid_eval[1:] - grid_eval[:-1]
-        log_delta_j = np.log(delta_j)
+        if self.objective_normalizer == "exact":
+            # k = 0: exp(f) is constant between consecutive candidate knots, so the
+            # normalizer is exactly a sum over those cells
+            edges = np.unique(np.concatenate(([0.0], grid_points_hal, [1.0])))
+            cells = pd.DataFrame({'W1': (edges[:-1] + edges[1:]) / 2})
+            b_jk = create_basis_functions(cells, grid_points_hal, order=0)[0]
+            log_delta_j = np.log(np.diff(edges))
+        else:
+            delta_j = grid_eval[1:] - grid_eval[:-1]
+            log_delta_j = np.log(delta_j)
         log_density_grid = b_jk @ theta
         log_terms = log_delta_j + log_density_grid
         log_Z = cp.log_sum_exp(log_terms)

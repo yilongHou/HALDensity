@@ -33,6 +33,15 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
 
 ### Added
 
+- `CVXPYEstimator(objective_normalizer="exact")` for k = 0: the fitting objective normalizes
+  exactly (one term per cell between consecutive candidate knots) instead of by the midpoint rule
+  on the 199-cell grid. Diagnosis (k = 0, M = 50, five simulated datasets): the midpoint objective
+  puts 31-100% of the mass in a cell 0.0042-0.0049 wide between two close knots that holds 5-10
+  data points but no grid midpoint, so the objective gains likelihood without paying for the mass
+  (training log-likelihood as low as -16.9 when evaluated exactly). With the exact objective the
+  spikes disappear and the 5-fold CV log-likelihood declines gradually past its peak (M = 5-23)
+  instead of collapsing. Fit time 1.1-1.4x (n = 300) to 1.7-2.5x (n = 1,280). Default unchanged
+  ("midpoint"); see `docs/dev/cvll-multicollinearity`.
 - Optional basis cleaning before the delta-method SE (`haldensity.core.univariate.support`):
   `refit_support_from_estimator(fit, data)` re-solves the full-data problem at the selected bound
   with tight tolerances (CLARABEL 1e-12/1e-10, ECOS 1e-12/1e-10, SCS 1e-9), prunes at 1e-4 and
