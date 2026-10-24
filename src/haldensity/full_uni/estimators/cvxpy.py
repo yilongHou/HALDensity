@@ -5,6 +5,8 @@ from typing import Optional
 from haldensity.core.basis.univariate import create_basis_functions
 from haldensity.core.solvers.cvxpy import solve_cvxpy_problem
 from haldensity.core.univariate.base_estimator import BaseEstimator
+from haldensity.core.univariate.normalizer import log_unnormalized_density
+from haldensity.core.univariate.objective import OBJECTIVE_NORMALIZERS, candidate_knots, normalizer_terms
 
 
 class CVXPYEstimator(BaseEstimator):
@@ -32,6 +34,7 @@ class CVXPYEstimator(BaseEstimator):
         solver_waterfall: list[str] = ["MOSEK", "CLARABEL", "ECOS", "SCS"],
         normalizer: str = "gauss_legendre",
         objective_normalizer: str = "midpoint",
+        max_knots: Optional[int] = None,
     ):
         """
         Initialize CVXPY estimator.
@@ -42,16 +45,18 @@ class CVXPYEstimator(BaseEstimator):
             n_grid_points: Number of grid points for density evaluation
             solver: CVXPY solver to use (default: "MOSEK")
             normalizer: how the fitted density is normalized when evaluated (see BaseEstimator)
-            objective_normalizer: the normalizer inside the fitting objective.
-                "midpoint" (default): midpoint rule on the n_grid_points - 1 equal cells.
-                "exact" (basis_order = 0 only): the exact integral of the piecewise-constant
-                exp(f), one term per cell between consecutive candidate knots, so a spike
-                between two close knots is not invisible to the objective.
+            objective_normalizer: the normalizer inside the fitting objective
+                (haldensity.core.univariate.objective). "midpoint" (default): midpoint rule on the
+                n_grid_points - 1 equal cells. "knot_aware": the candidate knots are breakpoints of
+                the cells, so no gap between knots is unseen; exact for basis_order = 0 (one term
+                per cell between consecutive knots, reusing the data term's values).
+            max_knots: cap K on the number of candidate knots, placed at K data quantiles
+                (observations, de-duplicated); None (default) uses every unique data value.
         """
-        if objective_normalizer not in ("midpoint", "exact"):
-            raise ValueError(f"objective_normalizer must be 'midpoint' or 'exact', got {objective_normalizer!r}")
-        if objective_normalizer == "exact" and basis_order != 0:
-            raise ValueError("objective_normalizer='exact' is implemented for basis_order=0 only")
+        if objective_normalizer not in OBJECTIVE_NORMALIZERS:
+            raise ValueError(f"objective_normalizer must be one of {OBJECTIVE_NORMALIZERS}, got {objective_normalizer!r}")
+        if max_knots is not None and int(max_knots) < 1:
+            raise ValueError("max_knots must be a positive integer or None")
         super().__init__(
             normalizer=normalizer,
             tol=tol,
@@ -63,6 +68,7 @@ class CVXPYEstimator(BaseEstimator):
         self.n_grid_points = n_grid_points
         self.solver = solver
         self.objective_normalizer = objective_normalizer
+        self.max_knots = None if max_knots is None else int(max_knots)
         
         # Internal, non-standard attributes for inspection
         self.optimized_theta_raw: Optional[np.ndarray] = None
@@ -83,21 +89,20 @@ class CVXPYEstimator(BaseEstimator):
             Self for method chaining
         """
         n_samples = len(data)
-        # grid_points_hal = np.unique(np.concatenate(([0], data['W1'].dropna(), [1])))  # Ensure grid includes 0 and 1
-        grid_points_hal = np.unique(data['W1'].dropna())
-        self._grid_points_hal = grid_points_hal  # Store the original full set of knots
+        # Candidate knots: every unique data value, or max_knots data quantiles
+        grid_points_hal = candidate_knots(data['W1'].dropna().to_numpy(dtype=float), self.max_knots)
+        self._grid_points_hal = grid_points_hal  # Store the full set of candidate knots
+        self._train_x = data['W1'].to_numpy(dtype=float)
         
         # Build basis for the data points
         basis_array, basis_names = create_basis_functions(data, grid_points_hal, order=self.basis_order)
         b_ik = basis_array  # shape: (n_samples, K)
         self.basis_names = basis_names
         
-        # Create evaluation grid (equally spaced points) and corresponding basis functions
+        # Cells of the objective's normalizer (midpoint grid, or knot-aware)
         grid_eval = np.linspace(0, 1, self.n_grid_points)
-        grid_midpoints = (grid_eval[:-1] + grid_eval[1:]) / 2
-        data_grid = pd.DataFrame({'W1': grid_midpoints})
-        basis_grid_array, _ = create_basis_functions(data_grid, grid_points_hal, order=self.basis_order)
-        b_jk = basis_grid_array  # shape: (len(grid_midpoints), K)
+        terms = normalizer_terms(self._train_x, grid_points_hal, self.basis_order, self.n_grid_points,
+                                 self.objective_normalizer)
         
         # K: number of basis functions
         if self.basis_order == 0:
@@ -109,19 +114,17 @@ class CVXPYEstimator(BaseEstimator):
         
         # Data log-density at the data points and at the evaluation grid
         # Since our basis includes the intercept, we use the full basis @ theta
-        first_term = -cp.sum(b_ik @ theta)
-        if self.objective_normalizer == "exact":
-            # k = 0: exp(f) is constant between consecutive candidate knots, so the
-            # normalizer is exactly a sum over those cells
-            edges = np.unique(np.concatenate(([0.0], grid_points_hal, [1.0])))
-            cells = pd.DataFrame({'W1': (edges[:-1] + edges[1:]) / 2})
-            b_jk = create_basis_functions(cells, grid_points_hal, order=0)[0]
-            log_delta_j = np.log(np.diff(edges))
+        data_log_density = b_ik @ theta
+        first_term = -cp.sum(data_log_density)
+        if terms.basis is not None:
+            log_density_grid = terms.basis @ theta
         else:
-            delta_j = grid_eval[1:] - grid_eval[:-1]
-            log_delta_j = np.log(delta_j)
-        log_density_grid = b_jk @ theta
-        log_terms = log_delta_j + log_density_grid
+            # k = 0 knot-aware: the level on the cell starting at a knot is the data term's value there
+            parts = [theta[0:1]] if terms.leading_intercept_cell else []
+            if terms.data_rows.size:
+                parts.append(data_log_density[terms.data_rows])
+            log_density_grid = cp.hstack(parts) if len(parts) > 1 else parts[0]
+        log_terms = terms.log_widths + log_density_grid
         log_Z = cp.log_sum_exp(log_terms)
         second_term = n_samples * log_Z
         
@@ -138,6 +141,7 @@ class CVXPYEstimator(BaseEstimator):
         )
         self.solver_used_ = solve_result.solver_used
         self.problem_status_ = solve_result.status
+        self.objective_value_ = solve_result.objective_value
 
         self.lambda_val_lag = problem.constraints[0].dual_value
         
@@ -181,6 +185,23 @@ class CVXPYEstimator(BaseEstimator):
 
         return self
     
+    def objective_log_normalizer(self, theta: Optional[np.ndarray] = None) -> float:
+        """log Z of the fitting objective's own normalizer at ``theta`` (default: the raw solution).
+
+        Compare with ``log_normalizer()`` (the accurate one): a large gap means the objective did
+        not see part of the fitted mass.
+        """
+        if not self.is_fitted:
+            raise ValueError("Estimator must be fitted first")
+        theta = np.asarray(self.optimized_theta_raw if theta is None else theta, dtype=float)
+        terms = normalizer_terms(self._train_x, self._grid_points_hal, self.basis_order, self.n_grid_points,
+                                 self.objective_normalizer)
+        data_log = None
+        if terms.basis is None:
+            data_log = log_unnormalized_density(self._train_x, theta, self._grid_points_hal, self.basis_order)
+        from scipy.special import logsumexp
+        return float(logsumexp(terms.log_widths + terms.log_density(theta, data_log)))
+
     def get_results(self) -> dict:
         """Return standardized common results plus CVX-specific fields."""
         if not self.is_fitted:
@@ -191,5 +212,8 @@ class CVXPYEstimator(BaseEstimator):
             "optimized_theta_raw": self.optimized_theta_raw,
             "norm_constraint": float(self.norm_constraint),
             "n_grid_points": int(self.n_grid_points),
+            "objective_normalizer": self.objective_normalizer,
+            "max_knots": self.max_knots,
+            "n_candidate_knots": int(len(self._grid_points_hal)),
         })
         return base

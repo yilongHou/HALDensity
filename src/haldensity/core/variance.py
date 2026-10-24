@@ -47,6 +47,8 @@ def _refit_key(estimation_results: dict, basis_order: int) -> Optional[tuple]:
         int(basis_order),
         float(estimation_results['norm_constraint']),
         int(estimation_results.get('n_grid_points', 200)),
+        str(estimation_results.get('objective_normalizer', 'midpoint')),
+        estimation_results.get('max_knots'),
     )
 
 
@@ -57,7 +59,9 @@ def _auto_refit(data: pd.DataFrame, estimation_results: dict, basis_order: int) 
         return None
     if key not in _REFIT_CACHE:
         refit = refit_support(data, int(basis_order), float(estimation_results['norm_constraint']),
-                              n_grid_points=int(estimation_results.get('n_grid_points', 200)))
+                              n_grid_points=int(estimation_results.get('n_grid_points', 200)),
+                              objective_normalizer=str(estimation_results.get('objective_normalizer', 'midpoint')),
+                              max_knots=estimation_results.get('max_knots'))
         knots = np.unique(np.asarray(estimation_results['data_points'], dtype=float))
         if not np.array_equal(refit.knots, knots):
             raise ValueError("data do not match the fit's knots; pass the data the estimator was fitted on")

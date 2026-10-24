@@ -44,6 +44,7 @@ import pandas as pd
 from scipy.special import logsumexp
 
 from haldensity.core.basis.univariate import create_basis_functions
+from haldensity.core.univariate.objective import candidate_knots, normalizer_terms
 
 LADDER: tuple[tuple[str, str, dict[str, Any]], ...] = (
     ("CLARABEL", "tol 1e-12", dict(tol_gap_abs=1e-12, tol_gap_rel=1e-12, tol_feas=1e-12, max_iter=400)),
@@ -61,18 +62,26 @@ _OK_STATUSES = ("optimal", "optimal_inaccurate")
 
 
 class FullDataHALProblem:
-    """``CVXPYEstimator``'s optimization problem for one sample."""
+    """``CVXPYEstimator``'s optimization problem for one sample (same knots and normalizer cells)."""
 
-    def __init__(self, data: pd.DataFrame, basis_order: int, n_grid_points: int = 200):
+    def __init__(self, data: pd.DataFrame, basis_order: int, n_grid_points: int = 200,
+                 objective_normalizer: str = "midpoint", max_knots: Optional[int] = None):
         x = np.asarray(data["W1"].dropna(), dtype=float)
         self.basis_order = int(basis_order)
         self.n = int(x.size)
-        self.knots = np.unique(x)
-        grid = np.linspace(0, 1, int(n_grid_points))
-        midpoints = (grid[:-1] + grid[1:]) / 2
+        self.knots = candidate_knots(x, max_knots)
         self.data_basis = create_basis_functions(pd.DataFrame({"W1": x}), self.knots, order=self.basis_order)[0]
-        self.grid_basis = create_basis_functions(pd.DataFrame({"W1": midpoints}), self.knots, order=self.basis_order)[0]
-        self.log_delta = np.log(np.diff(grid))
+        terms = normalizer_terms(x, self.knots, self.basis_order, n_grid_points, objective_normalizer)
+        if terms.basis is not None:
+            self.grid_basis = terms.basis
+        else:
+            rows = [self.data_basis[terms.data_rows]]
+            if terms.leading_intercept_cell:
+                intercept_only = np.zeros((1, self.data_basis.shape[1]), dtype=self.data_basis.dtype)
+                intercept_only[0, 0] = 1.0
+                rows.insert(0, intercept_only)
+            self.grid_basis = np.vstack(rows)
+        self.log_delta = terms.log_widths
 
     def solve(self, norm_constraint: float, solver: str, options: dict[str, Any]) -> tuple[Optional[np.ndarray], str]:
         theta = cp.Variable(self.data_basis.shape[1])
@@ -155,12 +164,14 @@ def refit_support(
     norm_constraint: float,
     *,
     n_grid_points: int = 200,
+    objective_normalizer: str = "midpoint",
+    max_knots: Optional[int] = None,
     ladder: tuple[tuple[str, str, dict[str, Any]], ...] = LADDER,
     prune: float = PRUNE,
 ) -> SupportRefit:
     """Re-solve the full-data HAL-MLE at ``norm_constraint`` with tight tolerances and certify the support."""
     started = perf_counter()
-    problem = FullDataHALProblem(data, basis_order, n_grid_points)
+    problem = FullDataHALProblem(data, basis_order, n_grid_points, objective_normalizer, max_knots)
     attempts: list[dict[str, Any]] = []
     best = None
     for solver, label, options in ladder:
@@ -204,7 +215,9 @@ def refit_support_from_estimator(estimator: Any, data: pd.DataFrame, **kwargs: A
     if not getattr(estimator, "is_fitted", False):
         raise ValueError("Estimator must be fitted first")
     refit = refit_support(data, int(estimator.basis_order), float(estimator.norm_constraint),
-                          n_grid_points=int(getattr(estimator, "n_grid_points", 200)), **kwargs)
+                          n_grid_points=int(getattr(estimator, "n_grid_points", 200)),
+                          objective_normalizer=getattr(estimator, "objective_normalizer", "midpoint"),
+                          max_knots=getattr(estimator, "max_knots", None), **kwargs)
     if not np.array_equal(refit.knots, np.asarray(estimator._grid_points_hal, dtype=float)):
         raise ValueError("The data do not match the estimator's knots; pass the data it was fitted on")
     return refit

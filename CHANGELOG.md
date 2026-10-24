@@ -37,15 +37,21 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   0-order basis, the flat CV log-likelihood it causes, and the conservative adjustment (LaTeX
   source, figures, and a Markdown rendering with the 0.2.0 k = 0 diagnosis); linked from
   `OptunaHyperparameterTuner` and `haldensity.core.cv.conservative`.
-- `CVXPYEstimator(objective_normalizer="exact")` for k = 0: the fitting objective normalizes
-  exactly (one term per cell between consecutive candidate knots) instead of by the midpoint rule
-  on the 199-cell grid. Diagnosis (k = 0, M = 50, five simulated datasets): the midpoint objective
-  puts 31-100% of the mass in a cell 0.0042-0.0049 wide between two close knots that holds 5-10
-  data points but no grid midpoint, so the objective gains likelihood without paying for the mass
-  (training log-likelihood as low as -16.9 when evaluated exactly). With the exact objective the
-  spikes disappear and the 5-fold CV log-likelihood declines gradually past its peak (M = 5-23)
-  instead of collapsing. Fit time 1.1-1.4x (n = 300) to 1.7-2.5x (n = 1,280). Default unchanged
-  ("midpoint"); see `docs/dev/cvll-multicollinearity`.
+- `CVXPYEstimator(objective_normalizer="knot_aware")` and `CVXPYEstimator(max_knots=K)`
+  (`haldensity.core.univariate.objective`). Knot-aware: the candidate knots are breakpoints of the
+  objective's normalizer cells; exact for k = 0 (one term per cell between consecutive knots,
+  reusing the data term's values, so no extra matrix), a knot-inserted midpoint grid for k >= 1.
+  `max_knots`: candidate knots at K data quantiles (observations, de-duplicated) instead of every
+  unique data value. Both default to the previous behaviour (`"midpoint"`, `None`), which is
+  reproduced bit for bit. Why: with the midpoint objective, k = 0, M = 50 (five simulated datasets),
+  31-100% of the mass sat in one cell 0.0042-0.0049 wide between two close knots holding 5-10
+  data points but no grid midpoint, so the objective gained likelihood without paying for the mass
+  (training log-likelihood as low as -16.9 when evaluated exactly); with the exact k = 0 objective
+  the spikes disappear and the 5-fold CV log-likelihood declines gradually past its peak instead of
+  collapsing. Defaults will be set after a benchmark of time, memory and accuracy at large n. New
+  diagnostics: `objective_log_normalizer()`, `objective_value_`; `get_results()` records the
+  objective normalizer, `max_knots` and the number of candidate knots; basis cleaning rebuilds the
+  same problem.
 - Basis cleaning before the delta-method SE, on by default (`haldensity.core.univariate.support`):
   the full-data problem is re-solved at the fit's bound with tight tolerances (CLARABEL
   1e-12/1e-10, ECOS 1e-12/1e-10, SCS 1e-9), pruned at 1e-4 and certified by the optimality
