@@ -1,6 +1,6 @@
 # HALDensity: Highly Adaptive Lasso Density Estimation (HAL-MLE/TMLE)
 
-HALDensity provides fast, principled 1D density estimation using Highly Adaptive Lasso (HAL) and optional targeting (TMLE) for functionals such as survival, moments, and the median. It includes multiple optimization backends (first-order, second-order, and conic optimization via CVXPY), a unified base estimator, cross-validation with Optuna, and tools for uncertainty quantification.
+HALDensity provides density estimation with the Highly Adaptive Lasso (HAL) for full and censored data and optional targeting (TMLE) for functionals such as survival, moments, and the median. It includes multiple optimization backends (first-order, second-order, and conic optimization via CVXPY), a unified base estimator, cross-validation with Optuna, and tools for uncertainty quantification.
 
 Features
 
@@ -12,8 +12,10 @@ Features
 - Delta-method style density bands; bootstrap example included
 - Targeted learning (TMLE) for survival, mean, and median
 - **Censored data support**:
-  - Right-censored density estimation via IPCW initialization, EM + MI, and censoring-aware Optuna tuning
-  - Interval-censored density estimation via midpoint initialization and EM refinement
+  - Right-censored density estimation via IPCW initialization, EM + MI, the observed-data L1-MLE and censoring-aware tuning; four point estimators with one call each (`haldensity.rc.fit_right_censored`) and targeting for survival, mean, RMST, density L2 and entropy
+  - Interval-censored density estimation via midpoint initialization and EM refinement; current-status data through `haldensity.ic.current_status`
+- Multivariate full-data HAL (`haldensity.full_multi`, experimental)
+- Sample data and simple simulators (`haldensity.datasets`, including the galaxy velocities)
 
 Install
 This repo uses Python 3.11+. With uv:
@@ -25,7 +27,9 @@ uv sync
 Or with pip:
 
 ```bash
-pip install -e .
+pip install -e .             # the package
+pip install -e ".[dev]"      # plus test and lint tools
+pip install -e ".[turnbull]" # plus lifelines, for knot_strategy="turnbull" with interval-censored data
 ```
 
 Or install directly from GitHub:
@@ -39,7 +43,7 @@ Quickstart
 ```python
 import numpy as np
 import pandas as pd
-from haldensity.estimation import CVXPYEstimator
+from haldensity.full_uni import CVXPYEstimator
 
 # Simulated data on [0, 1]
 rng = np.random.default_rng(0)
@@ -62,7 +66,7 @@ model = est.get_common_results_model()
 Cross-Validation (Optuna)
 
 ```python
-from haldensity.cross_validation.optuna_hyperparam_selector import OptunaHyperparameterTuner
+from haldensity.full_uni import OptunaHyperparameterTuner
 tuner = OptunaHyperparameterTuner(
     'CVXPYEstimator', data, cv_folds=5, metric='sll', silent=True,
     param_overrides={"basis_order": [0, 2]}
@@ -76,7 +80,7 @@ Targeted Learning (TMLE)
 ```python
 # Common prerequisites (after fitting an estimator)
 import numpy as np
-from haldensity.targeting import (
+from haldensity.full_uni.targeting import (
     CDFTargetLearner, SurvivalTargetLearner, MomentsTargetLearner, MedianTargetLearner,
     cdf_estimand_variance, survival_estimand_variance, moments_estimand_variance, median_estimand_variance,
 )
@@ -157,6 +161,9 @@ Notes
 
 Examples
 
+The examples are being reorganized into small tutorials per data type that run with the public API;
+until then some notebooks below still use pre-0.2.0 import paths.
+
 - `examples/example_full_data_density_estimator.ipynb`: quick demo of estimators on fully observed data
 - `examples/example_full_data_target_learning.ipynb`: targeting examples (TMLE for CDF, survival, moments, median)
 - `examples/example_full_data_case_study.ipynb`: real-data galaxy velocity case study
@@ -167,18 +174,18 @@ Repository Structure
 
 ```
 src/haldensity/
-  estimation/        # Estimators and base class
-  cross_validation/  # Optuna tuner and lambda selector
-  targeting/         # TMLE learners for survival/mean/median
-  density_variance/  # Variance/band utilities
-  censoring/         # Censored data estimation
-    right/           # Right-censoring: IPCW, KM, EM
-    interval/        # Interval-censoring: midpoint init, EM
-    tuners/          # Optuna tuners for censored data
-    utils/           # Shared metrics (KL divergence, etc.)
-  utils/             # Basis construction + math utilities
-examples/            # Notebooks and plotting helpers
+  core/         # shared by data types: basis (univariate and general d), univariate HAL base
+                # (BaseEstimator, weighted MLE, HALFit), solvers, CV, EM, variance, metrics
+  full_uni/     # univariate full data: estimators (one per solver), Optuna tuner, targeting
+  full_multi/   # multivariate full data (normalizer by Sobol QMC or exact k = 0 cells)
+  rc/           # right-censored: IPCW/EM, observed-data L1-MLE, tuners, pipelines, AIPW, targeting/
+  ic/           # interval-censored: estimators, tuners; current_status/
+  datasets/     # sample data (galaxies) and simple simulators
+docs/           # censored-data workflow notes; dev/ (layout, experiment write-ups)
+examples/       # notebooks
 ```
+
+See `CONTRIBUTING.md` for the development workflow and `CHANGELOG.md` for changes.
 
 License
 MIT
