@@ -74,19 +74,22 @@ def _auto_refit(data: pd.DataFrame, estimation_results: dict, basis_order: int) 
         knots = np.unique(np.asarray(estimation_results['data_points'], dtype=float))
         if not np.array_equal(refit.knots, knots):
             raise ValueError("data do not match the fit's knots; pass the data the estimator was fitted on")
-        if not refit.certified:
-            warnings.warn(
-                f"Basis cleaning could not certify the support (best of the solver ladder: "
-                f"{refit.kkt['n_kept_violating']} kept coefficients violate the optimality check); the SE "
-                "uses it anyway and result.attrs['basis_certified'] is False.",
-                UserWarning,
-                stacklevel=3,
-            )
         _REFIT_CACHE[key] = refit
         while len(_REFIT_CACHE) > _REFIT_CACHE_SIZE:
             _REFIT_CACHE.popitem(last=False)
     _REFIT_CACHE.move_to_end(key)
     return _REFIT_CACHE[key]
+
+
+NO_SE_WARNING = (
+    "Basis cleaning failed: the final fit did not pass the optimality check, so no SE or interval is "
+    "given (NaN); the point estimate is kept. For uncertainty use a bootstrap, or refit with another "
+    "solver (e.g. MOSEK), with more solver time, or at another bound."
+)
+
+
+def _cleaning_failed(support_refit: Optional[SupportRefit]) -> bool:
+    return support_refit is not None and not support_refit.certified
 
 
 def _selection_size(theta_full: np.ndarray, basis_order: int) -> int:
@@ -113,13 +116,21 @@ def estimate_covariance_beta(
     """Estimate Cov(β̂) via observed Fisher information with ridge regularization.
 
     ``support_refit="auto"`` (default) uses the cleaned basis when the results carry the fit's
-    L1 bound; ``None`` uses the original basis; a :class:`SupportRefit` is used as given.
+    L1 bound; ``None`` uses the original basis; a :class:`SupportRefit` is used as given. If basis
+    cleaning failed, no SE is given: the covariance is NaN, with a warning.
     """
     if isinstance(support_refit, str):
         if support_refit != "auto":
             raise ValueError("support_refit must be 'auto', None or a SupportRefit")
         support_refit = _auto_refit(data, estimation_results, basis_order)
     theta_hat_full = _theta_for_se(estimation_results, support_refit)
+    if _cleaning_failed(support_refit):
+        # decision 5 (Yilong, 2026-10-24): point estimate yes, SE no
+        warnings.warn(NO_SE_WARNING, UserWarning, stacklevel=2)
+        size = _selection_size(theta_hat_full, basis_order)
+        covariance = np.full((size, size), np.nan).view(BasisCovariance)
+        covariance.support_refit = support_refit
+        return covariance
     original_data_points = np.array(estimation_results['data_points'])
     grid_points_hal_original = np.unique(original_data_points)
 
@@ -247,7 +258,9 @@ def density_confidence_interval(
     cleaned basis computed by :func:`estimate_covariance_beta` for this fit if ``cov_beta`` has its
     size, else the original basis; ``None`` forces the original basis; a :class:`SupportRefit`
     is used as given. The ``density`` column is always the original fit. ``result.attrs`` records
-    the basis used and whether it was certified.
+    the basis used and whether it was certified. If basis cleaning failed (the final fit did not
+    pass the optimality check), ``se``, ``lower`` and ``upper`` are NaN, with a warning (decision 5,
+    Yilong 2026-10-24); ``support_refit=None`` still gives the original-basis SE.
     """
     original_theta = np.array(estimation_results['theta_hat'])
     if isinstance(support_refit, str):
@@ -268,6 +281,13 @@ def density_confidence_interval(
     knots = np.unique(np.array(estimation_results['data_points']))
     n_grid_points = len(estimation_results.get('grid_points', np.linspace(0, 1, 200)))
     x_values = np.clip(x_values, 0, 1)
+    if _cleaning_failed(support_refit):
+        warnings.warn(NO_SE_WARNING, UserWarning, stacklevel=2)
+        density_eval = _evaluation_pieces(x_values, original_theta, knots, basis_order, n_grid_points)[2]
+        nan = np.full(len(x_values), np.nan)
+        result_df = pd.DataFrame({'x': x_values, 'density': density_eval, 'se': nan, 'lower': nan, 'upper': nan})
+        result_df.attrs.update(basis='cleaned', basis_certified=False, se='none: basis cleaning failed')
+        return result_df
 
     theta_hat, phi_eval_selected, density_se_basis, expected_phi = _evaluation_pieces(
         x_values, _theta_for_se(estimation_results, support_refit), knots, basis_order, n_grid_points

@@ -273,9 +273,10 @@ class CVXPYEstimator(BaseEstimator):
         self.certified_, self.kkt_, self.solve_attempts_, self.support_ = fit.certified, fit.kkt, fit.attempts, fit
         if not fit.certified:
             warnings.warn(
-                f"The fit at norm_constraint={self.norm_constraint} could not be certified by the optimality "
-                f"check; the best attempt ({fit.solver_used} {fit.option}: {fit.kkt['n_failing']} coordinates fail "
-                f"the conditions, max ratio {fit.kkt['max_ratio']:.4g}) is used and certified_ is False.",
+                f"Basis cleaning failed at norm_constraint={self.norm_constraint}: no solver's solution passed "
+                f"the optimality check. The best attempt ({fit.solver_used} {fit.option}: {fit.kkt['n_failing']} "
+                f"coordinates fail the conditions, max ratio {fit.kkt['max_ratio']:.4g}) is the point estimate "
+                f"(certified_ is False); no SE or intervals will be given. Use a bootstrap or another solver.",
                 UserWarning,
                 stacklevel=3,
             )

@@ -75,6 +75,11 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   Gaussian mixture, n = 400 and 1,280, k = 1 and 2): basis 1,121-1,257 -> 5-33 functions at
   n = 1,280; mean SE / Monte Carlo sd 1.11-2.76 -> 0.80-1.25; coverage of the truth 85-100%
   (median 100%) -> 83-99% (median 94%).
+- **No SE when basis cleaning fails** (Yilong, 2026-10-24): if the final fit does not pass the
+  optimality check (or a separate cleaning refit does not), `estimate_covariance_beta` returns an
+  all-NaN covariance and `density_confidence_interval` the point estimate with NaN `se`, `lower` and
+  `upper`, each with a warning that suggests a bootstrap or another solver; before, the SE was
+  computed on that basis with a warning. `support_refit=None` still gives the original-basis SE.
 - **The objective's normalizer is chosen by order** (`CVXPYEstimator(objective_normalizer="auto")`,
   the new default; Yilong, 2026-10-24): the exact objective at k = 0, the midpoint rule with the
   knots added to the grid at k = 1 (both through the step-height rewrite), the old midpoint rule (199

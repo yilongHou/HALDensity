@@ -125,7 +125,7 @@ def test_the_best_attempt_is_kept_and_flagged(monkeypatch, data):
         return {**real(*args, **kwargs), "certified": False, "n_failing": next(failing)}
 
     monkeypatch.setattr(support, "kkt_report", nothing_certifies)
-    with pytest.warns(UserWarning, match="could not be certified"):
+    with pytest.warns(UserWarning, match="Basis cleaning failed"):
         fit = CVXPYEstimator(norm_constraint=20.0, basis_order=1, log_frequency=-1, **FREE_SOLVERS).fit(data)
     assert [(a["solver"], a["option"]) for a in fit.solve_attempts_] == [
         ("CLARABEL", "tol 1e-12"), ("CLARABEL", "tol 1e-10"), ("ECOS", "tol 1e-12"), ("ECOS", "tol 1e-10"),

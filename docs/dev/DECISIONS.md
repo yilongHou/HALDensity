@@ -49,7 +49,7 @@ Status: reference list, 2026-10-24. Each item says what was decided, when, and w
 
 | Setting | Decision |
 | --- | --- |
-| Delta-method SE | On the **certified basis of the final fit** (§3); on by default (`support_refit="auto"`; `None` switches it off). Claim strength: an empirical improvement in the simulations, not a guarantee; the selected basis is not unique (SE/sd 2.4–14 → 0.76–1.3 in the simulations) |
+| Delta-method SE | On the **certified basis of the final fit** (§3); on by default (`support_refit="auto"`; `None` switches it off). Claim strength: an empirical improvement in the simulations, not a guarantee; the selected basis is not unique (SE/sd 2.4–14 → 0.76–1.3 in the simulations). **If basis cleaning fails** (the final fit does not pass the optimality check): the point estimate is kept but **no SE and no intervals** (NaN), with a warning suggesting a bootstrap or another solver (decided 2026-10-24); `support_refit=None` still gives the original-basis SE on request |
 | Pointwise intervals at kinks and boundaries | **Deferred to the paper-version experiment rerun (Yilong, 2026-10-24); report both variants there.** Evidence so far: undersmooth for inference, M ≈ 2× the CV choice (coverage at the k = 1 kink 46–58% → 78–89%; boundary 74–80% → ≥ 93%); CV for the point estimate. Never use the conservative adjustment when the goal is inference |
 | Supports | Fixed in advance (e.g. [0, 1]); data rescaled by a known bound, not min–max of the sample. Galaxies: divide by c = 3×10⁵ km/s; raise `n_grid_points` if the data occupy a small part of [0, 1] |
 
@@ -82,7 +82,6 @@ Status: reference list, 2026-10-24. Each item says what was decided, when, and w
 
 - Extending the step-height rewrite to k ≥ 2 (not needed for now: the old midpoint rule at k ≥ 2 has the lean data term).
 - Whether the paper's theory-checking runs use every knot (experiment side).
-- No SE when the final fit is uncertified (instead of using it with a warning).
 - Accurate normalizer for the censored-data estimators (RC project handoff).
 - A package default for the order k: fixed k = 2 or CV over {0, 1, 2} (theory suggests k = 2; Phase B and the paper-version simulation decide).
 - Undersmoothing for pointwise intervals (c ≈ 2) vs the CV fit: decided at the paper-version rerun; Phase B's bias/sd at the kink for k = 2, 3 informs it.
