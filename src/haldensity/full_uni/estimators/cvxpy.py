@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import cvxpy as cp
 import warnings
-from typing import Optional
+from typing import Optional, Union
 from haldensity.core.basis.univariate import create_basis_functions
 from haldensity.core.solvers.cvxpy import build_solver_sequence, solve_cvxpy_problem, tight_ladder
 from haldensity.core.univariate.base_estimator import BaseEstimator
@@ -11,6 +11,7 @@ from haldensity.core.univariate.objective import (
     STRUCTURED_ORDERS,
     candidate_knots,
     normalizer_terms,
+    resolve_max_knots,
     structured_problem,
 )
 from haldensity.core.univariate.support import FullDataHALProblem, certified_solve
@@ -51,7 +52,7 @@ class CVXPYEstimator(BaseEstimator):
         solver_waterfall: list[str] = ["MOSEK", "CLARABEL", "ECOS", "SCS"],
         normalizer: str = "gauss_legendre",
         objective_normalizer: str = "midpoint",
-        max_knots: Optional[int] = None,
+        max_knots: Union[int, str, None] = "auto",
         solver_tolerance: str = "tight",
     ):
         """
@@ -69,7 +70,10 @@ class CVXPYEstimator(BaseEstimator):
                 the cells, so no gap between knots is unseen; exact for basis_order = 0 (one term
                 per cell between consecutive knots, reusing the data term's values).
             max_knots: cap K on the number of candidate knots, placed at K data quantiles
-                (observations, de-duplicated); None (default) uses every unique data value.
+                (observations, de-duplicated). "auto" (default): K = 1,000 for basis_order >= 1 and
+                max(1,000, ceil(n^(2/3))) for basis_order = 0, so only samples above 1,000 are
+                affected (haldensity.core.univariate.objective.default_max_knots); None: every
+                unique data value (the behaviour before 0.2.0); an integer: that K.
             solver_tolerance: "tight" (default; for the final fit at the chosen bound): the solvers
                 from `solver` and `solver_waterfall` with tight tolerances (MOSEK 1e-12; CLARABEL
                 1e-12 then 1e-10; ECOS 1e-12 then 1e-10; SCS 1e-9 capped at 600 s), each solution
@@ -84,8 +88,7 @@ class CVXPYEstimator(BaseEstimator):
             raise ValueError(f"solver_tolerance must be one of {SOLVER_TOLERANCES}, got {solver_tolerance!r}")
         if objective_normalizer not in OBJECTIVE_NORMALIZERS:
             raise ValueError(f"objective_normalizer must be one of {OBJECTIVE_NORMALIZERS}, got {objective_normalizer!r}")
-        if max_knots is not None and int(max_knots) < 1:
-            raise ValueError("max_knots must be a positive integer or None")
+        resolve_max_knots(max_knots, 1, basis_order)       # validates; the cap itself is set at fit time
         super().__init__(
             normalizer=normalizer,
             tol=tol,
@@ -97,13 +100,14 @@ class CVXPYEstimator(BaseEstimator):
         self.n_grid_points = n_grid_points
         self.solver = solver
         self.objective_normalizer = objective_normalizer
-        self.max_knots = None if max_knots is None else int(max_knots)
+        self.max_knots = max_knots if max_knots is None or isinstance(max_knots, str) else int(max_knots)
         self.solver_tolerance = solver_tolerance
         
         # Internal, non-standard attributes for inspection
         self.optimized_theta_raw: Optional[np.ndarray] = None
         self.lambda_val_lag: Optional[float] = None
         self.knot_aware_formulation_used_: Optional[str] = None
+        self.max_knots_used_: Optional[int] = None
         self.certified_: Optional[bool] = None
         self.kkt_: Optional[dict] = None
         self.solve_attempts_: tuple = ()
@@ -125,7 +129,9 @@ class CVXPYEstimator(BaseEstimator):
             Self for method chaining
         """
         # Candidate knots: every unique data value, or max_knots data quantiles
-        grid_points_hal = candidate_knots(data['W1'].dropna().to_numpy(dtype=float), self.max_knots)
+        observed = data['W1'].dropna().to_numpy(dtype=float)
+        grid_points_hal = candidate_knots(observed, self.max_knots, basis_order=self.basis_order)
+        self.max_knots_used_ = resolve_max_knots(self.max_knots, int(np.isfinite(observed).sum()), self.basis_order)
         self._grid_points_hal = grid_points_hal  # Store the full set of candidate knots
         self._train_x = data['W1'].to_numpy(dtype=float)
         
@@ -317,6 +323,7 @@ class CVXPYEstimator(BaseEstimator):
             "n_grid_points": int(self.n_grid_points),
             "objective_normalizer": self.objective_normalizer,
             "max_knots": self.max_knots,
+            "max_knots_used": self.max_knots_used_,
             "n_candidate_knots": int(len(self._grid_points_hal)),
             "knot_aware_formulation_used": self.knot_aware_formulation_used_,
             "solver_tolerance": self.solver_tolerance,

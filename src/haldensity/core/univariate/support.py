@@ -51,7 +51,7 @@ import copy
 import warnings
 from dataclasses import dataclass, field
 from time import perf_counter
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Union
 
 import cvxpy as cp
 import numpy as np
@@ -94,14 +94,14 @@ class FullDataHALProblem:
     """``CVXPYEstimator``'s optimization problem for one sample (same knots, cells and formulation)."""
 
     def __init__(self, data: pd.DataFrame, basis_order: int, n_grid_points: int = 200,
-                 objective_normalizer: str = "midpoint", max_knots: Optional[int] = None,
+                 objective_normalizer: str = "midpoint", max_knots: Union[int, str, None] = "auto",
                  structured: bool = True):
         self.x = np.asarray(data["W1"].dropna(), dtype=float)
         self.basis_order = int(basis_order)
         self.n = int(self.x.size)
         self.n_grid_points = int(n_grid_points)
         self.objective_normalizer = objective_normalizer
-        self.knots = candidate_knots(self.x, max_knots)
+        self.knots = candidate_knots(self.x, max_knots, basis_order=self.basis_order)
         self.structured = (bool(structured) and objective_normalizer == "knot_aware"
                            and self.basis_order in STRUCTURED_ORDERS)
         self.terms = normalizer_terms(self.x, self.knots, self.basis_order, self.n_grid_points, objective_normalizer,
@@ -291,7 +291,7 @@ def refit_support(
     *,
     n_grid_points: int = 200,
     objective_normalizer: str = "midpoint",
-    max_knots: Optional[int] = None,
+    max_knots: Union[int, str, None] = "auto",
     ladder: tuple[tuple[str, str, dict[str, Any]], ...] = LADDER,
     prune: float = PRUNE,
 ) -> SupportRefit:

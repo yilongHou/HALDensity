@@ -90,5 +90,5 @@ def test_basis_cleaning_rebuilds_the_same_problem(data, settings):
 def test_invalid_options_are_rejected():
     with pytest.raises(ValueError, match="objective_normalizer must be one of"):
         CVXPYEstimator(objective_normalizer="exact")
-    with pytest.raises(ValueError, match="max_knots must be a positive integer"):
+    with pytest.raises(ValueError, match="max_knots must be"):
         CVXPYEstimator(max_knots=0)

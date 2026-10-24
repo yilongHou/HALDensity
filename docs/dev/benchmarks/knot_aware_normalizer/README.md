@@ -2,6 +2,11 @@
 
 Run 2026-10-24 on blackbear (commit `aeba275`; Part 2 of the 2026-10-23 spec, option (b) of 2026-10-24).
 
+**Decision on the knot cap (Yilong, 2026-10-24):** default `max_knots="auto"`, K = 1,000 for k ≥ 1 and
+K = max(1,000, ⌈n^(2/3)⌉) for k = 0 (the k = 0 term acts only above n ≈ 31,600; see
+`haldensity.core.univariate.objective.default_max_knots`). The default objective per order is still
+pending.
+
 **Recommendation.** Make the knot-aware objective normalizer the default, with a knot cap of
 K = 1,000 candidate knots (`objective_normalizer="knot_aware"`, `max_knots=1000`; the cap only acts
 when n > 1,000).

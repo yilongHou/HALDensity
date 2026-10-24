@@ -75,6 +75,16 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   Gaussian mixture, n = 400 and 1,280, k = 1 and 2): basis 1,121-1,257 -> 5-33 functions at
   n = 1,280; mean SE / Monte Carlo sd 1.11-2.76 -> 0.80-1.25; coverage of the truth 85-100%
   (median 100%) -> 83-99% (median 94%).
+- **Knot cap on by default** (`CVXPYEstimator(max_knots="auto")`, Yilong 2026-10-24): at most
+  K = 1,000 candidate knots for k >= 1 and K = max(1,000, ceil(n^(2/3))) for k = 0, at K data
+  quantiles (`haldensity.core.univariate.objective.default_max_knots`). **Default results change for
+  n > 1,000**; samples up to 1,000 keep every knot, bit for bit. `max_knots=None` keeps every
+  unique data value (the old behaviour). The k = 0 rule is rough: with K knots a jump can only be
+  placed to within about 1/K, costing about h^2 / K in squared L2, which must stay below k = 0's
+  statistical error n^(-2/3). In the benchmark (`docs/dev/benchmarks/knot_aware_normalizer/`, the
+  exact objective at k = 0), K = 1,000 cost 5-13% in L2 on a jump density at n = 2,500-20,000
+  against all knots, and nothing on smooth or kinked densities. `get_results()` records
+  `max_knots` and the cap used, `max_knots_used`.
 - `OptunaHyperparameterTuner` uses 5 CV folds by default (`TUNER_DEFAULTS.cv_folds`, as the
   censored-data tuners) instead of 3, so default full-data CV results change; `cv_folds=3` gives
   the old split.

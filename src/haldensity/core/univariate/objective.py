@@ -14,7 +14,15 @@ normalizer ``log Z = log sum_c w_c exp(f(t_c))`` over cells c with widths w_c:
   per cell (not exact, but no gap between knots goes unseen).
 
 ``max_knots`` caps the number of candidate knots: K quantiles of the data (actual observations,
-de-duplicated), as hal9001's ``num_knots``; ``None`` keeps every unique data value.
+de-duplicated), as hal9001's ``num_knots``; ``None`` keeps every unique data value. ``"auto"`` (the
+estimator's default; Yilong, 2026-10-24) is :func:`default_max_knots`: K = 1,000 for k >= 1 and
+K = max(1,000, ceil(n^(2/3))) for k = 0. A rough rule backed by the benchmark
+(docs/dev/benchmarks/knot_aware_normalizer): with K knots a jump can only be placed to within about
+1/K, which costs about h^2 / K in squared L2 for a jump of height h; that must stay below the
+statistical error of k = 0, n^(-2/3), so K must be at least about n^(2/3). At k >= 1 the same count
+needs far fewer knots (about n^(4/15) for k = 1), so 1,000 is ample. On the jump density at
+n = 20,000 (n^(2/3) ~ 740), K = 1,000 cost 5-13% in L2 against all knots, K = 250 up to 43% and
+K = 100 up to 88%. The k = 0 rule exceeds 1,000 only above n of about 31,600.
 
 Structured formulation (knot-aware, k = 0 and 1). The dense formulation multiplies an n x m basis
 by theta. The same problem has a sparse form in the values of f on the cells (a linear, invertible
@@ -49,18 +57,51 @@ from haldensity.core.basis.univariate import create_basis_functions
 
 OBJECTIVE_NORMALIZERS = ("midpoint", "knot_aware")
 STRUCTURED_ORDERS = (0, 1)
+KNOT_CAP = 1000                  # default number of candidate knots (k >= 1; the floor for k = 0)
 
 
-def candidate_knots(x: np.ndarray, max_knots: Optional[int] = None) -> np.ndarray:
-    """All unique data values, or ``max_knots`` data quantiles (observations) when capped."""
+def default_max_knots(n: int, basis_order: int) -> int:
+    """The default knot cap: 1,000 for k >= 1, max(1,000, ceil(n^(2/3))) for k = 0 (module docstring)."""
+    if int(basis_order) != 0:
+        return KNOT_CAP
+    n = int(n)
+    k = max(1, int(round(n ** (2.0 / 3.0))))          # exact integer ceil(n^(2/3)): least k with k^3 >= n^2
+    while k ** 3 < n ** 2:
+        k += 1
+    while k > 1 and (k - 1) ** 3 >= n ** 2:
+        k -= 1
+    return max(KNOT_CAP, k)
+
+
+def resolve_max_knots(max_knots, n: int, basis_order: Optional[int]) -> Optional[int]:
+    """The cap K for a sample of n observations: ``"auto"`` -> :func:`default_max_knots`; None (all
+    knots) or a positive integer as given."""
+    if isinstance(max_knots, str):
+        if max_knots != "auto":
+            raise ValueError(f"max_knots must be 'auto', None or a positive integer, got {max_knots!r}")
+        if basis_order is None:
+            raise ValueError("max_knots='auto' needs the basis order")
+        return default_max_knots(n, basis_order)
+    if max_knots is None:
+        return None
+    if int(max_knots) < 1:
+        raise ValueError("max_knots must be 'auto', None or a positive integer")
+    return int(max_knots)
+
+
+def candidate_knots(x: np.ndarray, max_knots=None, basis_order: Optional[int] = None) -> np.ndarray:
+    """All unique data values, or K data quantiles (observations) when capped at K < #unique values.
+
+    ``max_knots``: None (all), a positive integer K, or ``"auto"`` (:func:`default_max_knots`, which
+    needs ``basis_order``; n is the number of finite observations).
+    """
     values = np.asarray(x, dtype=float).ravel()
     values = values[np.isfinite(values)]
     unique = np.unique(values)
-    if max_knots is None or int(max_knots) >= unique.size:
+    cap = resolve_max_knots(max_knots, values.size, basis_order)
+    if cap is None or cap >= unique.size:
         return unique
-    if int(max_knots) < 1:
-        raise ValueError("max_knots must be a positive integer or None")
-    probs = np.linspace(0.0, 1.0, int(max_knots))
+    probs = np.linspace(0.0, 1.0, cap)
     return np.unique(np.quantile(values, probs, method="inverted_cdf"))
 
 

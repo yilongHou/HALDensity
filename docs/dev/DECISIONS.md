@@ -20,9 +20,9 @@ Status: reference list, 2026-10-24. Each item says what was decided, when, and w
 
 | Setting | Decision | Why |
 | --- | --- | --- |
-| Basis and knots | Truncated powers of order k, knots at the data points; L1 constraint on all coefficients except the intercept | HALDensity's definition |
-| **Knot cap** `max_knots` | Option: K candidate knots at data quantiles. **Default: pending the benchmark** | Bounds memory and time at large n; keeps knots at least about 1/K apart (prevents near-collinear pairs) |
-| **Objective normalizer** | `"midpoint"` (199 fixed cells; current default) or `"knot_aware"` (knots are breakpoints: exact for k = 0, knot-inserted midpoint grid for k ≥ 1), implemented in a structured, sparse formulation. **Default: pending the benchmark** | The 199-cell midpoint objective is blind to mass between two close knots: the k = 0 spike (objective log Z 0.19 vs exact 18.4) |
+| Basis and knots | Truncated powers of order k, knots at the data points (at most K of them, see the knot cap); L1 constraint on all coefficients except the intercept | HALDensity's definition |
+| **Knot cap** `max_knots` | **Default `"auto"`: K = 1,000 for k ≥ 1; K = max(1,000, ⌈n^(2/3)⌉) for k = 0** (decided 2026-10-24), at K data quantiles; `None` = every data point. Changes default results only for n > 1,000 | Bounds memory and time at large n and keeps knots at least about 1/K apart. Rough rule for k = 0: a jump can only be placed to within about 1/K, costing about h²/K in squared L2, which must stay below n^(-2/3), so K ≳ n^(2/3) (acts only above n ≈ 31,600); k ≥ 1 needs far fewer knots (about n^(4/15) for k = 1). Benchmark: on a jump density at n = 20,000, K = 1,000 cost 5–13% in L2, K = 250 up to 43%, K = 100 up to 88%; nothing on smooth or kinked densities ([benchmarks/knot_aware_normalizer/](benchmarks/knot_aware_normalizer/README.md)) |
+| **Objective normalizer** | `"midpoint"`: the old midpoint rule (199 fixed cells; current default) or `"knot_aware"`: the exact objective for k = 0 and the midpoint rule with the knots added to the grid for k ≥ 1, solved through the step-height rewrite for k = 0 and 1. **Default per order: pending Yilong** (benchmark: the exact objective and the knots-added grid never spiked, were as accurate or better, and were faster than the old midpoint rule at large n) | The old midpoint rule is blind to mass between two close knots: the k = 0 spike (objective log Z 0.19 vs exact 18.4) |
 
 ## 3. Solvers and tolerances
 
@@ -79,10 +79,11 @@ Status: reference list, 2026-10-24. Each item says what was decided, when, and w
 
 ## 8. Pending decisions
 
-- Defaults for the knot-aware objective normalizer and the knot cap K: benchmark done 2026-10-24, recommendation knot-aware with K = 1,000 ([benchmarks/knot_aware_normalizer/](benchmarks/knot_aware_normalizer/README.md)); awaiting Yilong.
+- Default objective per order (the exact objective at k = 0, the midpoint rule with the knots added to the grid at k = 1, the old midpoint rule at k ≥ 2, chosen per order inside one CV search), and extending the step-height rewrite to k ≥ 2.
+- Whether the paper's theory-checking runs use every knot (experiment side).
 - No SE when the final fit is uncertified (instead of using it with a warning).
 - Whether a CV safeguard is needed for k ≥ 1 once the objective sees spikes (paired-difference rule as the candidate).
 - Accurate normalizer for the censored-data estimators (RC project handoff).
-- A package default for the order k (theory suggests k = 2; Phase B and the paper-version simulation decide).
+- A package default for the order k: fixed k = 2 or CV over {0, 1, 2} (theory suggests k = 2; Phase B and the paper-version simulation decide).
 - Undersmoothing for pointwise intervals (c ≈ 2) vs the CV fit: decided at the paper-version rerun; Phase B's bias/sd at the kink for k = 2, 3 informs it.
 - Current-status and interval-censored notebook destinations; examples triage and tutorials; release version, merge and branch clean-up.
