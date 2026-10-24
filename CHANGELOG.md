@@ -33,6 +33,16 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
 
 ### Added
 
+- Optional basis cleaning before the delta-method SE (`haldensity.core.univariate.support`):
+  `refit_support_from_estimator(fit, data)` re-solves the full-data problem at the selected bound
+  with tight tolerances (CLARABEL 1e-12/1e-10, ECOS 1e-12/1e-10, SCS 1e-9), prunes at 1e-4 and
+  certifies the support by the optimality conditions; pass it as `support_refit=` to
+  `estimate_covariance_beta` and `density_confidence_interval`. The point estimate stays the
+  original fit; an uncertified refit is kept and flagged (`result.attrs["basis_certified"]`).
+  Off by default (decision pending). With MOSEK, 100 replicates per setting (truncated normal and
+  Gaussian mixture, n = 400 and 1,280, k = 1 and 2): basis 1,121-1,257 -> 5-33 functions at
+  n = 1,280; mean SE / Monte Carlo sd 1.11-2.76 -> 0.80-1.25; coverage of the truth 85-100%
+  (median 100%) -> 83-99% (median 94%).
 - `haldensity.rc.fit_right_censored(method=...)` and `fit_ipcw_hal`, `fit_l1mle_m1`,
   `fit_cvl1mle` (default method), `fit_undersmoothed`: the four right-censored point estimators
   with the same inputs and outputs (`RightCensoredPointEstimate`).
