@@ -32,14 +32,14 @@ def test_default_matches_the_pre_option_problem(data):
         problem = cp.Problem(cp.Minimize(loss), [cp.norm1(theta[1:]) <= 5.0])
         solve_cvxpy_problem(problem=problem, primary_solver="ECOS", use_secondary_solver=False)
         fit = CVXPYEstimator(norm_constraint=5.0, basis_order=k, max_knots=None, solver_tolerance="default",
-                             objective_normalizer="midpoint", **ECOS).fit(data)
+                             _objective_normalizer="midpoint", **ECOS).fit(data)
         # theta[0] is not identified (a constant added to f cancels between the data term and n log Z)
         np.testing.assert_allclose(fit.optimized_theta_raw[1:], theta.value[1:], rtol=0, atol=1e-5)
         assert fit.objective_value_ == pytest.approx(problem.value, rel=1e-7)
 
 
 def test_k0_knot_aware_objective_is_the_exact_integral(data):
-    fit = CVXPYEstimator(norm_constraint=20.0, basis_order=0, objective_normalizer="knot_aware",
+    fit = CVXPYEstimator(norm_constraint=20.0, basis_order=0, _objective_normalizer="knot_aware",
                          log_frequency=-1).fit(data)
     theta, knots = fit.optimized_theta_raw, fit._grid_points_hal
     exact = log_normalizer(theta, knots, 0).log_z
@@ -53,7 +53,7 @@ def test_knot_aware_removes_the_k0_spike(data):
     x = data["W1"].to_numpy()
     train_ll = {}
     for name in ("midpoint", "knot_aware"):
-        fit = CVXPYEstimator(norm_constraint=50.0, basis_order=0, objective_normalizer=name, log_frequency=-1).fit(data)
+        fit = CVXPYEstimator(norm_constraint=50.0, basis_order=0, _objective_normalizer=name, log_frequency=-1).fit(data)
         train_ll[name] = float(np.mean(fit.get_log_density_at_points(x)))
     assert train_ll["knot_aware"] > 0.5 and train_ll["knot_aware"] > train_ll["midpoint"]
 
@@ -61,7 +61,7 @@ def test_knot_aware_removes_the_k0_spike(data):
 def test_k1_knot_aware_sees_more_of_the_mass_than_the_midpoint_grid(data):
     gaps = {}
     for name in ("midpoint", "knot_aware"):
-        fit = CVXPYEstimator(norm_constraint=1e4, basis_order=1, objective_normalizer=name, log_frequency=-1).fit(data)
+        fit = CVXPYEstimator(norm_constraint=1e4, basis_order=1, _objective_normalizer=name, log_frequency=-1).fit(data)
         accurate = log_normalizer(fit.optimized_theta_raw, fit._grid_points_hal, 1).log_z
         gaps[name] = abs(accurate - fit.objective_log_normalizer())
     assert gaps["knot_aware"] <= gaps["midpoint"]
@@ -83,8 +83,8 @@ def test_max_knots_places_knots_at_data_quantiles(data):
     np.testing.assert_array_equal(uncapped.optimized_theta_raw, huge.optimized_theta_raw)
 
 
-@pytest.mark.parametrize("settings", [dict(basis_order=0, objective_normalizer="knot_aware", max_knots=40),
-                                      dict(basis_order=1, objective_normalizer="knot_aware", max_knots=40)])
+@pytest.mark.parametrize("settings", [dict(basis_order=0, _objective_normalizer="knot_aware", max_knots=40),
+                                      dict(basis_order=1, _objective_normalizer="knot_aware", max_knots=40)])
 def test_basis_cleaning_rebuilds_the_same_problem(data, settings):
     fit = CVXPYEstimator(norm_constraint=10.0, log_frequency=-1, **settings).fit(data)
     refit = refit_support_from_estimator(fit, data)
@@ -92,7 +92,7 @@ def test_basis_cleaning_rebuilds_the_same_problem(data, settings):
 
 
 def test_invalid_options_are_rejected():
-    with pytest.raises(ValueError, match="objective_normalizer must be one of"):
-        CVXPYEstimator(objective_normalizer="exact")
+    with pytest.raises(ValueError, match="_objective_normalizer must be None or one of"):
+        CVXPYEstimator(_objective_normalizer="exact")
     with pytest.raises(ValueError, match="max_knots must be"):
         CVXPYEstimator(max_knots=0)

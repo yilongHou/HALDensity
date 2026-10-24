@@ -23,7 +23,7 @@ def data():
 def fit(data):
     # a loosely solved fit (v0.1.0 solver settings): the SE basis comes from a separate refit
     return CVXPYEstimator(norm_constraint=20.0, basis_order=1, log_frequency=-1, solver_tolerance="default",
-                          objective_normalizer="midpoint").fit(data)
+                          _objective_normalizer="midpoint").fit(data)
 
 
 @pytest.fixture(scope="module")

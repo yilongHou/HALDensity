@@ -1,4 +1,4 @@
-"""objective_normalizer="auto": the objective's normalizer chosen by order k and dimension d (Yilong, 2026-10-24)."""
+"""The objective's normalizer is the package's choice, by order k and dimension d (Yilong, 2026-10-24)."""
 
 import numpy as np
 import pandas as pd
@@ -42,14 +42,24 @@ def test_univariate_resolution():
 
 @pytest.mark.parametrize("k,explicit,rule", [(0, "knot_aware", EXACT), (1, "knot_aware", MIDPOINT_KNOTS_ADDED),
                                              (2, "midpoint", MIDPOINT)])
-def test_auto_is_the_rule_of_the_order(k, explicit, rule):
+def test_the_default_is_the_rule_of_the_order(k, explicit, rule):
     data = _data()
-    auto = CVXPYEstimator(norm_constraint=10.0, basis_order=k, log_frequency=-1).fit(data)
-    given = CVXPYEstimator(norm_constraint=10.0, basis_order=k, log_frequency=-1, objective_normalizer=explicit).fit(data)
-    np.testing.assert_array_equal(auto.optimized_theta_raw, given.optimized_theta_raw)
-    results = auto.get_results()
-    assert results["objective_normalizer"] == "auto" and results["objective_rule"] == rule
-    assert results["objective_normalizer_used"] == explicit
+    default = CVXPYEstimator(norm_constraint=10.0, basis_order=k, log_frequency=-1).fit(data)
+    given = CVXPYEstimator(norm_constraint=10.0, basis_order=k, log_frequency=-1, _objective_normalizer=explicit).fit(data)
+    np.testing.assert_array_equal(default.optimized_theta_raw, given.optimized_theta_raw)
+    results = default.get_results()
+    assert results["objective_rule"] == rule and results["objective_normalizer"] == explicit
+
+
+def test_the_choice_is_not_a_user_option():
+    import inspect
+    public = [name for name in inspect.signature(CVXPYEstimator).parameters if not name.startswith("_")]
+    assert "objective_normalizer" not in public and not hasattr(CVXPYEstimator, "knot_aware_formulation")
+    # the internal hook still forces a rule (tests, benchmarks, experiment repos)
+    forced = CVXPYEstimator(norm_constraint=10.0, basis_order=0, log_frequency=-1, _objective_normalizer="midpoint")
+    assert forced.fit(_data()).get_results()["objective_rule"] == MIDPOINT
+    with pytest.raises(ValueError, match="_objective_normalizer"):
+        CVXPYEstimator(_objective_normalizer="auto")
 
 
 def test_a_joint_search_records_each_trials_objective():

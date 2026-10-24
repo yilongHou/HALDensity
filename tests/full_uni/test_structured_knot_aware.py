@@ -29,9 +29,9 @@ CASES = [
 
 
 def _fit(data, k, M, K, formulation, solver_tolerance="default"):
-    fit = CVXPYEstimator(norm_constraint=M, basis_order=k, log_frequency=-1, objective_normalizer="knot_aware",
+    fit = CVXPYEstimator(norm_constraint=M, basis_order=k, log_frequency=-1, _objective_normalizer="knot_aware",
                          max_knots=K, solver_tolerance=solver_tolerance)
-    fit.knot_aware_formulation = formulation
+    fit._knot_aware_formulation = formulation
     return fit.fit(data)
 
 

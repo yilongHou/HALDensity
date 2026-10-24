@@ -101,11 +101,11 @@ def _estimator(k: int, config: str, M: float, solver_tolerance: str):
     from haldensity.full_uni import CVXPYEstimator
     extra = dict(solver_waterfall=FIT_SOLVERS) if solver_tolerance == "tight" else {}
     fit = CVXPYEstimator(norm_constraint=M, basis_order=k, log_frequency=-1,
-                         objective_normalizer="midpoint" if config == "A" else "knot_aware",
+                         _objective_normalizer="midpoint" if config == "A" else "knot_aware",
                          max_knots=int(config[1:]) if config.startswith("C") else None,
                          solver_tolerance=solver_tolerance, **extra)
     if config == "D":
-        fit.knot_aware_formulation = "dense"
+        fit._knot_aware_formulation = "dense"
     return fit
 
 

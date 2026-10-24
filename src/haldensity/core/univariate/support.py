@@ -300,7 +300,7 @@ def refit_support_from_estimator(estimator: Any, data: pd.DataFrame, **kwargs: A
         raise ValueError("Estimator must be fitted first")
     refit = refit_support(data, int(estimator.basis_order), float(estimator.norm_constraint),
                           n_grid_points=int(getattr(estimator, "n_grid_points", 200)),
-                          objective_normalizer=getattr(estimator, "objective_normalizer", "midpoint"),
+                          objective_normalizer=getattr(estimator, "objective_normalizer_used_", None) or "midpoint",
                           max_knots=getattr(estimator, "max_knots", None),
                           solver_threads=getattr(estimator, "solver_threads", DEFAULT_SOLVER_THREADS), **kwargs)
     if not np.array_equal(refit.knots, np.asarray(estimator._grid_points_hal, dtype=float)):

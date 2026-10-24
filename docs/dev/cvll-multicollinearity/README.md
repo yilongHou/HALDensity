@@ -27,7 +27,7 @@ Gaussian mixture and a step density with n = 400), `CVXPYEstimator` with k = 0 a
   likelihood of those points while the objective's midpoint normalizer does not see the extra mass
   (its log Z is 0.2 against an exact 18.4 in the worst case), so the objective rewards the spike.
   Evaluated with the exact normalizer, the training log-likelihood of such fits is as low as -16.9.
-- `CVXPYEstimator(objective_normalizer="exact")` (k = 0 only) normalizes inside the objective
+- The exact objective (k = 0; the package's choice since 0.2.0) normalizes inside the objective
   exactly, one term per cell between consecutive candidate knots. With it the spikes are gone, and
   the cross-validated log-likelihood (5 folds, exact scoring) rises, peaks at M = 5-23 and then
   declines gradually past the turning point (e.g. 0.506 at M = 10-23 down to 0.03 at M = 10^4),

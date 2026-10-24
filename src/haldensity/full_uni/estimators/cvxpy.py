@@ -15,7 +15,7 @@ from haldensity.core.solvers.cvxpy import (
 from haldensity.core.univariate.base_estimator import BaseEstimator
 from haldensity.core.univariate.objective import (
     STRUCTURED_ORDERS,
-    OBJECTIVE_SETTINGS,
+    OBJECTIVE_NORMALIZERS,
     candidate_knots,
     dense_problem,
     normalizer_terms,
@@ -38,15 +38,18 @@ class CVXPYEstimator(BaseEstimator):
     
     min_θ  −ℓ(θ)  subject to  ‖θ[1:]‖₁ ≤ norm_constraint
     
-    where ℓ is the HAL-basis log-likelihood.
+    where ℓ is the HAL-basis log-likelihood. The normalizer inside the objective is the package's choice,
+    by the order (haldensity.core.objective_rules): the exact objective at basis_order 0, the midpoint
+    rule with the knots added to the grid at 1, the old 199-cell midpoint rule at 2 and above;
+    get_results()["objective_rule"] records it.
     """
 
-    # How objective_normalizer="knot_aware" is solved for basis_order 0 and 1: "structured" (sparse
-    # reparametrization in the cell values, haldensity.core.univariate.objective.structured_problem)
-    # or "dense" (the n x m basis; kept as a reference for verification). Same optimum either way.
-    # If no solver reaches status "optimal" on the structured form, the fit falls back to the dense form;
+    # Internal (tests, benchmarks): how the knots-added objective is solved for basis_order 0 and 1,
+    # "structured" (the step-height rewrite, haldensity.core.univariate.objective.structured_problem) or
+    # "dense" (the problem in theta; a reference for verification). Same optimum either way. If no solver
+    # reaches status "optimal" on the structured form, the fit falls back to the dense form;
     # knot_aware_formulation_used_ records which one produced the fit.
-    knot_aware_formulation = "structured"
+    _knot_aware_formulation = "structured"
     
     def __init__(
         self,
@@ -60,10 +63,10 @@ class CVXPYEstimator(BaseEstimator):
         use_secondary_solver: bool = True,
         solver_waterfall: list[str] = ["MOSEK", "CLARABEL", "ECOS", "SCS"],
         normalizer: str = "gauss_legendre",
-        objective_normalizer: str = "auto",
         max_knots: Union[int, str, None] = "auto",
         solver_tolerance: str = "tight",
         solver_threads: int = DEFAULT_SOLVER_THREADS,
+        _objective_normalizer: Optional[str] = None,
     ):
         """
         Initialize CVXPY estimator.
@@ -74,14 +77,6 @@ class CVXPYEstimator(BaseEstimator):
             n_grid_points: Number of grid points for density evaluation
             solver: CVXPY solver to use (default: "MOSEK")
             normalizer: how the fitted density is normalized when evaluated (see BaseEstimator)
-            objective_normalizer: the normalizer inside the fitting objective
-                (haldensity.core.univariate.objective). "auto" (default; Yilong, 2026-10-24): by the
-                order (haldensity.core.objective_rules), the exact objective at basis_order = 0, the
-                midpoint rule with the knots added to the grid at 1 (both "knot_aware", through the
-                step-height rewrite), the old midpoint rule at >= 2. "midpoint": the old midpoint rule
-                on the n_grid_points - 1 equal cells (the default before 0.2.0). "knot_aware": the
-                candidate knots are breakpoints of the cells, so no gap between knots is unseen; exact
-                for basis_order = 0. objective_rule_ and get_results() record the rule used.
             max_knots: cap K on the number of candidate knots, placed at K data quantiles
                 (observations, de-duplicated). "auto" (default): K = 1,000 for basis_order >= 1 and
                 max(1,000, ceil(n^(2/3))) for basis_order = 0, so only samples above 1,000 are
@@ -102,8 +97,8 @@ class CVXPYEstimator(BaseEstimator):
         """
         if solver_tolerance not in SOLVER_TOLERANCES:
             raise ValueError(f"solver_tolerance must be one of {SOLVER_TOLERANCES}, got {solver_tolerance!r}")
-        if objective_normalizer not in OBJECTIVE_SETTINGS:
-            raise ValueError(f"objective_normalizer must be one of {OBJECTIVE_SETTINGS}, got {objective_normalizer!r}")
+        if _objective_normalizer is not None and _objective_normalizer not in OBJECTIVE_NORMALIZERS:
+            raise ValueError(f"_objective_normalizer must be None or one of {OBJECTIVE_NORMALIZERS}")
         resolve_max_knots(max_knots, 1, basis_order)       # validates; the cap itself is set at fit time
         super().__init__(
             normalizer=normalizer,
@@ -115,7 +110,9 @@ class CVXPYEstimator(BaseEstimator):
         self.norm_constraint = norm_constraint
         self.n_grid_points = n_grid_points
         self.solver = solver
-        self.objective_normalizer = objective_normalizer
+        # Internal hook (tests, benchmarks, experiment repos): force the objective's normalizer, "midpoint"
+        # or "knot_aware"; None (always for users) lets the package choose by the order, see objective_rule_
+        self._objective_normalizer = _objective_normalizer
         self.max_knots = max_knots if max_knots is None or isinstance(max_knots, str) else int(max_knots)
         self.solver_tolerance = solver_tolerance
         thread_options("MOSEK", solver_threads)            # validates
@@ -127,6 +124,7 @@ class CVXPYEstimator(BaseEstimator):
         self.knot_aware_formulation_used_: Optional[str] = None
         self.max_knots_used_: Optional[int] = None
         self.objective_rule_: Optional[str] = None
+        self.objective_normalizer_used_: Optional[str] = None
         self.certified_: Optional[bool] = None
         self.kkt_: Optional[dict] = None
         self.solve_attempts_: tuple = ()
@@ -151,7 +149,8 @@ class CVXPYEstimator(BaseEstimator):
         observed = data['W1'].dropna().to_numpy(dtype=float)
         grid_points_hal = candidate_knots(observed, self.max_knots, basis_order=self.basis_order)
         self.max_knots_used_ = resolve_max_knots(self.max_knots, int(np.isfinite(observed).sum()), self.basis_order)
-        self.objective_rule_ = resolve_objective_normalizer(self.objective_normalizer, self.basis_order)[1]
+        self.objective_normalizer_used_, self.objective_rule_ = resolve_objective_normalizer(
+            self._objective_normalizer or "auto", self.basis_order)
         self._grid_points_hal = grid_points_hal  # Store the full set of candidate knots
         self._train_x = data['W1'].to_numpy(dtype=float)
         
@@ -207,14 +206,14 @@ class CVXPYEstimator(BaseEstimator):
     @property
     def _objective(self) -> str:
         """The implemented objective normalizer for this order ("auto" resolved)."""
-        return resolve_objective_normalizer(self.objective_normalizer, self.basis_order)[0]
+        return resolve_objective_normalizer(self._objective_normalizer or "auto", self.basis_order)[0]
 
     def _default_solve(self, data: pd.DataFrame, grid_points_hal: np.ndarray):
         """solver_tolerance="default": the solvers' own tolerances, first acceptable status wins (v0.1.0)."""
         structured = (
             self._objective == "knot_aware"
             and self.basis_order in STRUCTURED_ORDERS
-            and self.knot_aware_formulation == "structured"
+            and self._knot_aware_formulation == "structured"
         )
         solve_options = dict(
             primary_solver=self.solver,
@@ -255,8 +254,8 @@ class CVXPYEstimator(BaseEstimator):
 
     def _tight_solve(self, data: pd.DataFrame, grid_points_hal: np.ndarray):
         """solver_tolerance="tight": one certified solve (haldensity.core.univariate.support.certified_solve)."""
-        problem = FullDataHALProblem(data, self.basis_order, self.n_grid_points, self.objective_normalizer,
-                                     self.max_knots, structured=self.knot_aware_formulation == "structured")
+        problem = FullDataHALProblem(data, self.basis_order, self.n_grid_points, self._objective,
+                                     self.max_knots, structured=self._knot_aware_formulation == "structured")
         if not np.array_equal(problem.knots, grid_points_hal):
             raise RuntimeError("internal error: the certified solve built different knots")
         solvers = build_solver_sequence(self.solver, use_secondary_solver=self.use_secondary_solver,
@@ -318,8 +317,7 @@ class CVXPYEstimator(BaseEstimator):
             "optimized_theta_raw": self.optimized_theta_raw,
             "norm_constraint": float(self.norm_constraint),
             "n_grid_points": int(self.n_grid_points),
-            "objective_normalizer": self.objective_normalizer,
-            "objective_normalizer_used": self._objective,
+            "objective_normalizer": self._objective,       # the implemented normalizer (cleaning rebuilds it)
             "objective_rule": self.objective_rule_,
             "max_knots": self.max_knots,
             "max_knots_used": self.max_knots_used_,

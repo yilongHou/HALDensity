@@ -29,7 +29,7 @@ def test_tight_tolerances_reach_every_solver(monkeypatch, data):
 
     monkeypatch.setattr(cp.Problem, "solve", record)
     with pytest.raises(RuntimeError, match="No solver configuration"):
-        CVXPYEstimator(norm_constraint=10.0, basis_order=1, log_frequency=-1, objective_normalizer="midpoint").fit(data)
+        CVXPYEstimator(norm_constraint=10.0, basis_order=1, log_frequency=-1, _objective_normalizer="midpoint").fit(data)
     assert [c["solver"] for c in calls] == ["MOSEK", "CLARABEL", "CLARABEL", "ECOS", "ECOS", "SCS"]
     # the tolerances, plus the single-thread setting (haldensity.core.solvers.thread_options)
     assert calls[0]["mosek_params"] == {**MOSEK_TIGHT_PARAMS, "MSK_IPAR_NUM_THREADS": 1}
@@ -49,7 +49,7 @@ def test_tight_tolerances_reach_every_solver(monkeypatch, data):
     calls.clear()
     with pytest.raises(RuntimeError):
         CVXPYEstimator(norm_constraint=10.0, basis_order=1, log_frequency=-1, solver_tolerance="default",
-                       objective_normalizer="midpoint").fit(data)
+                       _objective_normalizer="midpoint").fit(data)
     assert calls and all(set(c) == {"solver"} | set(thread_options(c["solver"])) for c in calls)
 
 
@@ -61,11 +61,11 @@ def test_tight_ladder_follows_the_solver_settings():
 @pytest.mark.parametrize("k,normalizer,M", CASES)
 def test_the_final_fit_is_the_old_cleaned_basis(data, k, normalizer, M):
     # v0.1.0 fit + separate cleaning refit (free solvers, as before MOSEK joined the ladder) ...
-    old = CVXPYEstimator(norm_constraint=M, basis_order=k, objective_normalizer=normalizer, log_frequency=-1,
+    old = CVXPYEstimator(norm_constraint=M, basis_order=k, _objective_normalizer=normalizer, log_frequency=-1,
                          solver_tolerance="default").fit(data)
     cleaned = refit_support_from_estimator(old, data, ladder=tight_ladder(["CLARABEL", "ECOS", "SCS"]))
     # ... equals the single tight fit with the same solvers: point estimate and SE basis at once
-    new = CVXPYEstimator(norm_constraint=M, basis_order=k, objective_normalizer=normalizer, log_frequency=-1,
+    new = CVXPYEstimator(norm_constraint=M, basis_order=k, _objective_normalizer=normalizer, log_frequency=-1,
                          **FREE_SOLVERS).fit(data)
     np.testing.assert_array_equal(new.theta_hat, cleaned.theta)
     assert new.certified_ and cleaned.certified
@@ -88,7 +88,7 @@ def test_the_se_uses_the_fits_own_certified_basis(data):
 
 
 def test_a_slack_bound_is_certified_by_a_vanishing_gradient(data):
-    fit = CVXPYEstimator(norm_constraint=1000.0, basis_order=0, objective_normalizer="knot_aware",
+    fit = CVXPYEstimator(norm_constraint=1000.0, basis_order=0, _objective_normalizer="knot_aware",
                          log_frequency=-1).fit(data)
     assert fit.kkt_["bound"] == "slack" and fit.certified_
     assert fit.kkt_["max_gradient_per_obs"] <= 1e-5

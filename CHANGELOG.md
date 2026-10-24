@@ -37,13 +37,12 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   0-order basis, the flat CV log-likelihood it causes, and the conservative adjustment (LaTeX
   source, figures, and a Markdown rendering with the 0.2.0 k = 0 diagnosis); linked from
   `OptunaHyperparameterTuner` and `haldensity.core.cv.conservative`.
-- `CVXPYEstimator(objective_normalizer="knot_aware")` and `CVXPYEstimator(max_knots=K)`
-  (`haldensity.core.univariate.objective`). Knot-aware: the candidate knots are breakpoints of the
-  objective's normalizer cells; exact for k = 0 (one term per cell between consecutive knots,
-  reusing the data term's values, so no extra matrix), a knot-inserted midpoint grid for k >= 1.
-  `max_knots`: candidate knots at K data quantiles (observations, de-duplicated) instead of every
-  unique data value. Both default to the previous behaviour (`"midpoint"`, `None`), which is
-  reproduced bit for bit. Why: with the midpoint objective, k = 0, M = 50 (five simulated datasets),
+- The exact objective for k = 0 and the midpoint rule with the knots added to the grid for k >= 1
+  (`haldensity.core.univariate.objective`; the candidate knots are breakpoints of the normalizer's
+  cells: exact for k = 0, one term per cell between consecutive knots), and
+  `CVXPYEstimator(max_knots=K)`: candidate knots at K data quantiles (observations, de-duplicated)
+  instead of every unique data value. Which objective a fit uses is the package's choice (see "The
+  objective's normalizer is chosen by order" below); the knot cap's default is below too. Why: with the midpoint objective, k = 0, M = 50 (five simulated datasets),
   31-100% of the mass sat in one cell 0.0042-0.0049 wide between two close knots holding 5-10
   data points but no grid midpoint, so the objective gained likelihood without paying for the mass
   (training log-likelihood as low as -16.9 when evaluated exactly); with the exact k = 0 objective
@@ -62,7 +61,7 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   times faster. Scaled for the solvers (objective / n; k = 1 slopes / max(1, M)). If no solver
   reaches status "optimal" on it, the fit uses the dense form; `knot_aware_formulation_used_` and
   `get_results()["knot_aware_formulation_used"]` record which. The dense form stays available as
-  `CVXPYEstimator.knot_aware_formulation = "dense"`. Defaults unchanged.
+  `CVXPYEstimator._knot_aware_formulation = "dense"` (internal). Defaults unchanged.
 - Basis cleaning before the delta-method SE, on by default (`haldensity.core.univariate.support`):
   the full-data problem is re-solved at the fit's bound with tight tolerances (CLARABEL
   1e-12/1e-10, ECOS 1e-12/1e-10, SCS 1e-9), pruned at 1e-4 and certified by the optimality
@@ -88,20 +87,21 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   all-NaN covariance and `density_confidence_interval` the point estimate with NaN `se`, `lower` and
   `upper`, each with a warning that suggests a bootstrap or another solver; before, the SE was
   computed on that basis with a warning. `support_refit=None` still gives the original-basis SE.
-- **The objective's normalizer is chosen by order** (`CVXPYEstimator(objective_normalizer="auto")`,
-  the new default; Yilong, 2026-10-24): the exact objective at k = 0, the midpoint rule with the
-  knots added to the grid at k = 1 (both through the step-height rewrite), the old midpoint rule (199
-  fixed cells) at k >= 2. **Default results change at k = 0 and 1**; k >= 2 is unchanged. In a CV
-  search over orders each trial uses its order's rule (the tuner needs no setting;
-  `trial.user_attrs["objective_rule"]` records it), and basis cleaning and the SE rebuild the same
-  problem. The rule is `haldensity.core.objective_rules.objective_rule(k, d)`, which returns an
-  identifier that each data-type package implements: d = 1 as above (`haldensity.full_uni`); d >= 2 the
-  multivariate estimator's existing rule (exact below the cell quota, the Sobol bank above, at k = 0;
-  the Sobol bank at k >= 1), now recorded in `MultvarHAL.get_results()["objective_rule"]`. Fits record
-  `objective_rule` and `objective_normalizer_used`; `objective_normalizer="midpoint"` gives the old
-  default. Evidence: `docs/dev/benchmarks/knot_aware_normalizer/` (the old midpoint rule spiked at
-  k = 0; the other two never did and were as accurate or better); at k = 2 the knots-added grid cost
-  107-415 s per 5-fold CV trial at n = 1,280 against 3.4-4.3 s, with about the same CV score.
+- **The objective's normalizer is chosen by order, by the package** (Yilong, 2026-10-24; not a user
+  option): the exact objective at k = 0, the midpoint rule with the knots added to the grid at k = 1
+  (both through the step-height rewrite), the old midpoint rule (199 fixed cells) at k >= 2. **Default
+  results change at k = 0 and 1**; k >= 2 is unchanged. In a CV search over orders each trial uses
+  its order's rule (`trial.user_attrs["objective_rule"]` records it), and basis cleaning and the SE
+  rebuild the same problem. The rule is `haldensity.core.objective_rules.objective_rule(k, d)`, which
+  returns an identifier that each data-type package implements: d = 1 as above (`haldensity.full_uni`);
+  d >= 2 the multivariate estimator's existing rule (exact below the cell quota, the Sobol bank above,
+  at k = 0; the Sobol bank at k >= 1), now recorded in `MultvarHAL.get_results()["objective_rule"]`.
+  Fits record `objective_rule` and the implemented `objective_normalizer`. Internal hooks for tests,
+  benchmarks and experiment repos only: `CVXPYEstimator(_objective_normalizer="midpoint" or
+  "knot_aware")` and the class attribute `_knot_aware_formulation`. Evidence:
+  `docs/dev/benchmarks/knot_aware_normalizer/` (the old midpoint rule spiked at k = 0; the other two
+  never did and were as accurate or better); at k = 2 the knots-added grid cost 107-415 s per 5-fold
+  CV trial at n = 1,280 against 3.4-4.3 s, with about the same CV score.
 - **The old midpoint rule without the n x p data basis** (Yilong, 2026-10-24): the data term
   -sum_i f(x_i) is linear in theta, -s' theta with s the basis column sums, which are computed exactly
   from sorted data and prefix sums (O(n log n); `haldensity.core.univariate.objective.data_basis_sums`).
