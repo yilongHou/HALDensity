@@ -88,6 +88,18 @@ def test_a_slack_bound_is_certified_by_a_vanishing_gradient(data):
     assert fit.kkt_["max_gradient_per_obs"] <= 1e-5
 
 
+def test_the_bound_is_classified_by_its_multiplier(data):
+    fit = CVXPYEstimator(norm_constraint=20.0, basis_order=1, log_frequency=-1, **FREE_SOLVERS).fit(data)
+    problem, theta = FullDataHALProblem(data, 1), fit.optimized_theta_raw
+    l1 = np.abs(theta[1:]).sum()
+    # a solver stopping slightly inside the ball (as MOSEK's near-optimal stop does) is still binding
+    near = kkt_report(problem, theta, norm_constraint=l1 / 0.9998)
+    assert near["bound"] == "active" and near["certified"]
+    # lambda > 0 with the bound far from binding is not optimal
+    far = kkt_report(problem, theta, norm_constraint=2 * l1)
+    assert far["bound"] == "active" and not far["certified"]
+
+
 def test_an_uncertified_fit_is_flagged_and_warned(monkeypatch, data):
     import haldensity.core.univariate.support as support
 

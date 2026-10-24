@@ -22,8 +22,9 @@ certifies the result with :func:`kkt_report`:
 * a kept coordinate is violating when |gradient_j| < 0.99 lambda;
 * the support is certified when none is violating and no knot coordinate has
   |gradient_j| > 1.01 lambda;
-* if the bound is not binding (||theta[1:]||_1 < (1 - 1e-4) M), lambda = 0 and
-  the solution is certified when max_j |gradient_j| / n <= 1e-5.
+* if lambda / n <= 1e-5 the bound is not binding (lambda = 0) and the solution
+  is certified when max_j |gradient_j| / n <= 1e-5; otherwise the bound must
+  also be binding, ||theta[1:]||_1 >= (1 - 1e-3) M.
 
 The same routine (:func:`certified_solve`, MOSEK 1e-12 first) is the final fit
 of ``CVXPYEstimator(solver_tolerance="tight")``, its default: there the
@@ -70,8 +71,9 @@ RESIDUE_FLOOR = 1e-8
 KKT_SLACK = 0.99
 MAX_RATIO = 1.01
 BIG_FRACTION = 0.1
-ACTIVE_BOUND = 1e-4          # ||theta[1:]||_1 below (1 - this) * M: the bound is not binding
-SLACK_GRADIENT_TOL = 1e-5    # then certified when max |gradient_j| / n is at most this
+SLACK_GRADIENT_TOL = 1e-5    # lambda / n at most this: the bound is not binding; then certified when
+                             # max |gradient_j| / n is at most this too
+ACTIVE_BOUND = 1e-3          # a binding bound needs ||theta[1:]||_1 >= (1 - this) * M
 _OK_STATUSES = ("optimal", "optimal_inaccurate")
 
 
@@ -155,32 +157,25 @@ def kkt_report(problem: FullDataHALProblem, theta: np.ndarray, prune: float = PR
     kept = np.abs(knot_theta) > prune
     l1_raw = float(np.abs(theta[1:]).sum())
     max_gradient = float(np.max(np.abs(gradient), initial=0.0)) / max(problem.n, 1)
-    if norm_constraint is not None and l1_raw < (1.0 - ACTIVE_BOUND) * float(norm_constraint):
-        # the bound is not binding: lambda = 0 and the whole gradient must vanish
-        return dict(
-            bound="slack", lambda_hat=0.0, n_knots=int(problem.knots.size), n_kept=int(kept.sum()),
-            n_kept_violating=0, n_residue=int(np.sum((np.abs(knot_theta) > RESIDUE_FLOOR) & ~kept)),
-            n_near_active=0, max_ratio=float("nan"), l1_raw=l1_raw, max_gradient_per_obs=max_gradient,
-            certified=bool(max_gradient <= SLACK_GRADIENT_TOL),
-        )
     big = kept & (np.abs(knot_theta) >= BIG_FRACTION * np.max(np.abs(knot_theta), initial=0.0))
     lam = float(np.median(np.abs(knot_gradient[big]))) if big.any() else float(np.max(np.abs(gradient[1:]), initial=0.0))
+    common = dict(n_knots=int(problem.knots.size), n_kept=int(kept.sum()),
+                  n_residue=int(np.sum((np.abs(knot_theta) > RESIDUE_FLOOR) & ~kept)), l1_raw=l1_raw,
+                  max_gradient_per_obs=max_gradient)
+    if norm_constraint is not None and lam / max(problem.n, 1) <= SLACK_GRADIENT_TOL:
+        # multiplier ~ 0: the bound is not binding, so the whole gradient must vanish
+        return dict(bound="slack", lambda_hat=lam, n_kept_violating=0, n_near_active=0, max_ratio=float("nan"),
+                    certified=bool(max_gradient <= SLACK_GRADIENT_TOL), **common)
     ratio = np.abs(knot_gradient) / lam if lam > 0 else np.full(knot_gradient.shape, np.nan)
     violating = int(np.sum(kept & (ratio < slack)))
     max_ratio = float(np.nanmax(ratio)) if ratio.size and np.any(np.isfinite(ratio)) else float("nan")
-    return dict(
-        bound="active" if norm_constraint is not None else "assumed active",
-        lambda_hat=lam,
-        n_knots=int(problem.knots.size),
-        n_kept=int(kept.sum()),
-        n_kept_violating=violating,
-        n_residue=int(np.sum((np.abs(knot_theta) > RESIDUE_FLOOR) & ~kept)),
-        n_near_active=int(np.sum(ratio >= slack)),
-        max_ratio=max_ratio,
-        l1_raw=l1_raw,
-        max_gradient_per_obs=max_gradient,
-        certified=bool(violating == 0 and (not np.isfinite(max_ratio) or max_ratio <= MAX_RATIO)),
-    )
+    certified = violating == 0 and (not np.isfinite(max_ratio) or max_ratio <= MAX_RATIO)
+    if norm_constraint is not None:
+        # lambda > 0 needs the bound to be binding (complementary slackness)
+        certified = certified and l1_raw >= (1.0 - ACTIVE_BOUND) * float(norm_constraint)
+    return dict(bound="active" if norm_constraint is not None else "assumed active", lambda_hat=lam,
+                n_kept_violating=violating, n_near_active=int(np.sum(ratio >= slack)), max_ratio=max_ratio,
+                certified=bool(certified), **common)
 
 
 @dataclass(frozen=True)
