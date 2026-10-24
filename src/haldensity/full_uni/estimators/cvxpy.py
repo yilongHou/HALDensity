@@ -4,7 +4,13 @@ import cvxpy as cp
 import warnings
 from typing import Optional, Union
 from haldensity.core.basis.univariate import create_basis_functions
-from haldensity.core.solvers.cvxpy import build_solver_sequence, solve_cvxpy_problem, tight_ladder
+from haldensity.core.solvers.cvxpy import (
+    DEFAULT_SOLVER_THREADS,
+    build_solver_sequence,
+    solve_cvxpy_problem,
+    thread_options,
+    tight_ladder,
+)
 from haldensity.core.univariate.base_estimator import BaseEstimator
 from haldensity.core.univariate.objective import (
     OBJECTIVE_NORMALIZERS,
@@ -54,6 +60,7 @@ class CVXPYEstimator(BaseEstimator):
         objective_normalizer: str = "midpoint",
         max_knots: Union[int, str, None] = "auto",
         solver_tolerance: str = "tight",
+        solver_threads: int = DEFAULT_SOLVER_THREADS,
     ):
         """
         Initialize CVXPY estimator.
@@ -83,6 +90,9 @@ class CVXPYEstimator(BaseEstimator):
                 basis the delta-method SE basis; certified_, kkt_ and solve_attempts_ record the
                 check. "default": the solvers' own tolerances, first acceptable status wins, no
                 check (v0.1.0; OptunaHyperparameterTuner uses it in the CV folds).
+            solver_threads: threads per solver call (default 1: MOSEK, CLARABEL and the BLAS/OpenMP
+                pools run single-threaded, so parallel runs on shared servers do not take other
+                people's cores). Raise it when one fit runs alone on a dedicated machine.
         """
         if solver_tolerance not in SOLVER_TOLERANCES:
             raise ValueError(f"solver_tolerance must be one of {SOLVER_TOLERANCES}, got {solver_tolerance!r}")
@@ -102,6 +112,8 @@ class CVXPYEstimator(BaseEstimator):
         self.objective_normalizer = objective_normalizer
         self.max_knots = max_knots if max_knots is None or isinstance(max_knots, str) else int(max_knots)
         self.solver_tolerance = solver_tolerance
+        thread_options("MOSEK", solver_threads)            # validates
+        self.solver_threads = int(solver_threads)
         
         # Internal, non-standard attributes for inspection
         self.optimized_theta_raw: Optional[np.ndarray] = None
@@ -195,6 +207,7 @@ class CVXPYEstimator(BaseEstimator):
             primary_solver=self.solver,
             use_secondary_solver=self.use_secondary_solver,
             solver_waterfall=self.solver_waterfall,
+            solver_threads=self.solver_threads,
         )
         solve_result = None
         if structured:
@@ -235,7 +248,8 @@ class CVXPYEstimator(BaseEstimator):
             raise RuntimeError("internal error: the certified solve built different knots")
         solvers = build_solver_sequence(self.solver, use_secondary_solver=self.use_secondary_solver,
                                         solver_waterfall=self.solver_waterfall)
-        fit = certified_solve(problem, float(self.norm_constraint), tight_ladder(solvers), prune=self.tol)
+        fit = certified_solve(problem, float(self.norm_constraint), tight_ladder(solvers), prune=self.tol,
+                              solver_threads=self.solver_threads)
         self.basis_names = create_basis_functions(
             pd.DataFrame({'W1': [0.5]}), grid_points_hal, order=self.basis_order
         )[1]

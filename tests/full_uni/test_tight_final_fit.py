@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from haldensity.core.solvers.cvxpy import MOSEK_TIGHT_PARAMS, tight_ladder
+from haldensity.core.solvers.cvxpy import MOSEK_TIGHT_PARAMS, thread_options, tight_ladder
 from haldensity.core.univariate.support import FullDataHALProblem, kkt_report, refit_support_from_estimator
 from haldensity.core.variance import _REFIT_CACHE, density_confidence_interval, estimate_covariance_beta
 from haldensity.full_uni import CVXPYEstimator
@@ -31,20 +31,25 @@ def test_tight_tolerances_reach_every_solver(monkeypatch, data):
     with pytest.raises(RuntimeError, match="No solver configuration"):
         CVXPYEstimator(norm_constraint=10.0, basis_order=1, log_frequency=-1).fit(data)
     assert [c["solver"] for c in calls] == ["MOSEK", "CLARABEL", "CLARABEL", "ECOS", "ECOS", "SCS"]
-    assert calls[0]["mosek_params"] == MOSEK_TIGHT_PARAMS and calls[0]["accept_unknown"] is True
+    # the tolerances, plus the single-thread setting (haldensity.core.solvers.thread_options)
+    assert calls[0]["mosek_params"] == {**MOSEK_TIGHT_PARAMS, "MSK_IPAR_NUM_THREADS": 1}
+    assert calls[0]["accept_unknown"] is True
     assert all(calls[0]["mosek_params"][f"MSK_DPAR_INTPNT_CO_TOL_{name}"] == 1e-12
                for name in ("REL_GAP", "PFEAS", "DFEAS"))
-    assert calls[1] == dict(solver="CLARABEL", tol_gap_abs=1e-12, tol_gap_rel=1e-12, tol_feas=1e-12, max_iter=400)
-    assert calls[2] == dict(solver="CLARABEL", tol_gap_abs=1e-10, tol_gap_rel=1e-10, tol_feas=1e-10, max_iter=300)
+    clarabel_threads = thread_options("CLARABEL")
+    assert calls[1] == dict(solver="CLARABEL", tol_gap_abs=1e-12, tol_gap_rel=1e-12, tol_feas=1e-12, max_iter=400,
+                            **clarabel_threads)
+    assert calls[2] == dict(solver="CLARABEL", tol_gap_abs=1e-10, tol_gap_rel=1e-10, tol_feas=1e-10, max_iter=300,
+                            **clarabel_threads)
     assert calls[3] == dict(solver="ECOS", abstol=1e-12, reltol=1e-12, feastol=1e-12, max_iters=500)
     assert calls[4] == dict(solver="ECOS", abstol=1e-10, reltol=1e-10, feastol=1e-10, max_iters=300)
     assert calls[5] == dict(solver="SCS", eps_abs=1e-9, eps_rel=1e-9, max_iters=200000, time_limit_secs=600.0)
 
-    # solver_tolerance="default" passes no tolerance (v0.1.0)
+    # solver_tolerance="default" passes no tolerance (v0.1.0), only the thread setting
     calls.clear()
     with pytest.raises(RuntimeError):
         CVXPYEstimator(norm_constraint=10.0, basis_order=1, log_frequency=-1, solver_tolerance="default").fit(data)
-    assert calls and all(set(c) == {"solver"} for c in calls)
+    assert calls and all(set(c) == {"solver"} | set(thread_options(c["solver"])) for c in calls)
 
 
 def test_tight_ladder_follows_the_solver_settings():

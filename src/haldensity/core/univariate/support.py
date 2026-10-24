@@ -58,7 +58,7 @@ import numpy as np
 import pandas as pd
 
 from haldensity.core.basis.univariate import create_basis_functions
-from haldensity.core.solvers.cvxpy import TIGHT_LADDER
+from haldensity.core.solvers.cvxpy import DEFAULT_SOLVER_THREADS, TIGHT_LADDER, limited_threads, with_threads
 from haldensity.core.univariate.objective import (
     STRUCTURED_ORDERS,
     candidate_knots,
@@ -130,9 +130,10 @@ class FullDataHALProblem:
         problem = cp.Problem(cp.Minimize(loss), [l1])
         return BuiltProblem(problem, l1, lambda: None if theta.value is None else theta.value, "dense")
 
-    def solve(self, norm_constraint: float, solver: str, options: dict[str, Any]) -> tuple[Optional[np.ndarray], str]:
+    def solve(self, norm_constraint: float, solver: str, options: dict[str, Any],
+              threads: int = DEFAULT_SOLVER_THREADS) -> tuple[Optional[np.ndarray], str]:
         built = self.build(norm_constraint)
-        _solve_quietly(built.problem, solver, options)
+        _solve_quietly(built.problem, solver, options, threads)
         value = built.theta()
         return (None if value is None else np.asarray(value, dtype=float).copy()), str(built.problem.status)
 
@@ -141,11 +142,12 @@ class FullDataHALProblem:
         return objective_gradient(theta, self.x, self.knots, self.basis_order, self.terms)
 
 
-def _solve_quietly(problem: cp.Problem, solver: str, options: dict[str, Any]) -> None:
-    with warnings.catch_warnings():
+def _solve_quietly(problem: cp.Problem, solver: str, options: dict[str, Any],
+                   threads: int = DEFAULT_SOLVER_THREADS) -> None:
+    with warnings.catch_warnings(), limited_threads(threads):
         # the ladder records each status and the optimality check decides; CVXPY's notice is noise here
         warnings.filterwarnings("ignore", message="Solution may be inaccurate", category=UserWarning)
-        problem.solve(solver=solver, **copy.deepcopy(options))
+        problem.solve(solver=solver, **with_threads(solver, options, threads))
 
 
 def kkt_report(problem: FullDataHALProblem, theta: np.ndarray, prune: float = PRUNE,
@@ -221,6 +223,7 @@ def certified_solve(
     norm_constraint: float,
     ladder: tuple[tuple[str, str, dict[str, Any]], ...] = LADDER,
     prune: float = PRUNE,
+    solver_threads: int = DEFAULT_SOLVER_THREADS,
 ) -> SupportRefit:
     """Solve ``problem`` at ``norm_constraint`` down ``ladder`` until the optimality check certifies.
 
@@ -241,7 +244,7 @@ def certified_solve(
             call: dict[str, Any] = dict(solver=solver, option=label, formulation=built.formulation)
             began = perf_counter()
             try:
-                _solve_quietly(built.problem, solver, options)
+                _solve_quietly(built.problem, solver, options, solver_threads)
             except Exception as exc:  # solver availability and failures vary by platform
                 attempts.append(dict(call, outcome=f"{type(exc).__name__}: {exc}"[:300], seconds=perf_counter() - began))
                 continue
@@ -294,10 +297,11 @@ def refit_support(
     max_knots: Union[int, str, None] = "auto",
     ladder: tuple[tuple[str, str, dict[str, Any]], ...] = LADDER,
     prune: float = PRUNE,
+    solver_threads: int = DEFAULT_SOLVER_THREADS,
 ) -> SupportRefit:
     """Re-solve the full-data HAL-MLE at ``norm_constraint`` with tight tolerances and certify the support."""
     problem = FullDataHALProblem(data, basis_order, n_grid_points, objective_normalizer, max_knots)
-    return certified_solve(problem, norm_constraint, ladder, prune)
+    return certified_solve(problem, norm_constraint, ladder, prune, solver_threads)
 
 
 def refit_support_from_estimator(estimator: Any, data: pd.DataFrame, **kwargs: Any) -> SupportRefit:
@@ -307,7 +311,8 @@ def refit_support_from_estimator(estimator: Any, data: pd.DataFrame, **kwargs: A
     refit = refit_support(data, int(estimator.basis_order), float(estimator.norm_constraint),
                           n_grid_points=int(getattr(estimator, "n_grid_points", 200)),
                           objective_normalizer=getattr(estimator, "objective_normalizer", "midpoint"),
-                          max_knots=getattr(estimator, "max_knots", None), **kwargs)
+                          max_knots=getattr(estimator, "max_knots", None),
+                          solver_threads=getattr(estimator, "solver_threads", DEFAULT_SOLVER_THREADS), **kwargs)
     if not np.array_equal(refit.knots, np.asarray(estimator._grid_points_hal, dtype=float)):
         raise ValueError("The data do not match the estimator's knots; pass the data it was fitted on")
     return refit

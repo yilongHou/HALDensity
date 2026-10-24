@@ -1,14 +1,73 @@
-"""Shared CVXPY solver selection and fallback utilities."""
+"""Shared CVXPY solver selection and fallback utilities.
+
+Threads. Every solver call is single-threaded by default (``DEFAULT_SOLVER_THREADS``; Yilong,
+2026-10-24, so that runs on shared servers do not take other people's cores). Per call, through each
+solver's own parameter: MOSEK ``MSK_IPAR_NUM_THREADS``; CLARABEL ``max_threads`` (its Rayon pool;
+versions without the setting are single-threaded). SCS and ECOS are single-threaded. The BLAS/OpenMP
+pools of numpy and scipy are limited for the duration of the call with ``threadpoolctl``. On a
+256-core server an uncapped CLARABEL solve used 109 cores and took 4 times as long as with one thread;
+MOSEK used 5.6. Raise the count with ``solver_threads`` when one fit runs alone on a dedicated machine.
+"""
 
 from __future__ import annotations
 
+import contextlib
+import copy
 from dataclasses import dataclass
-from typing import Any, Callable, Iterable, Optional, Sequence
+from typing import Any, Callable, Iterable, Iterator, Optional, Sequence
 
 import cvxpy as cp
 
 
 DEFAULT_ACCEPTABLE_STATUSES: frozenset[str] = frozenset({"optimal", "optimal_inaccurate"})
+DEFAULT_SOLVER_THREADS = 1
+
+
+def _clarabel_has_max_threads() -> bool:
+    try:
+        import clarabel
+        return hasattr(clarabel.DefaultSettings(), "max_threads")
+    except Exception:  # not installed: CVXPY reports it when CLARABEL is asked for
+        return False
+
+
+_CLARABEL_THREADS = _clarabel_has_max_threads()
+
+
+def thread_options(solver_name: str, threads: int = DEFAULT_SOLVER_THREADS) -> dict[str, Any]:
+    """Per-call options that limit ``solver_name``'s own threads to ``threads`` (empty if it has none)."""
+    threads = int(threads)
+    if threads < 1:
+        raise ValueError("solver_threads must be a positive integer")
+    name = str(solver_name).strip().upper()
+    if name == "MOSEK":
+        return {"mosek_params": {"MSK_IPAR_NUM_THREADS": threads}}
+    if name == "CLARABEL" and _CLARABEL_THREADS:
+        return {"max_threads": threads}
+    return {}
+
+
+def with_threads(solver_name: str, options: dict[str, Any], threads: int = DEFAULT_SOLVER_THREADS) -> dict[str, Any]:
+    """``options`` plus the thread limit for ``solver_name`` (MOSEK parameters are merged, not replaced)."""
+    merged = copy.deepcopy(dict(options))
+    for key, value in thread_options(solver_name, threads).items():
+        if key == "mosek_params":
+            merged["mosek_params"] = {**dict(merged.get("mosek_params") or {}), **value}
+        else:
+            merged[key] = value
+    return merged
+
+
+@contextlib.contextmanager
+def limited_threads(threads: int = DEFAULT_SOLVER_THREADS) -> Iterator[None]:
+    """Limit the BLAS/OpenMP pools of numpy, scipy and the solvers to ``threads`` while inside."""
+    try:
+        from threadpoolctl import threadpool_limits
+    except ImportError:  # pragma: no cover - threadpoolctl comes with scikit-learn
+        yield
+        return
+    with threadpool_limits(limits=int(threads)):
+        yield
 
 
 @dataclass(frozen=True)
@@ -61,8 +120,12 @@ def solve_cvxpy_problem(
     build_solve_kwargs: Callable[[str], dict[str, Any]] | None = None,
     before_attempt: Callable[[str], None] | None = None,
     acceptable_statuses: Iterable[str] = DEFAULT_ACCEPTABLE_STATUSES,
+    solver_threads: int = DEFAULT_SOLVER_THREADS,
 ) -> CVXPYSolveResult:
-    """Solve a CVXPY problem with a primary solver and optional fallback sequence."""
+    """Solve a CVXPY problem with a primary solver and optional fallback sequence.
+
+    Each call runs with ``solver_threads`` threads (default 1; see the module docstring).
+    """
     candidates = build_solver_sequence(
         primary_solver=primary_solver,
         use_secondary_solver=use_secondary_solver,
@@ -83,10 +146,12 @@ def solve_cvxpy_problem(
             before_attempt(solver_name)
 
         kwargs = {} if build_solve_kwargs is None else dict(build_solve_kwargs(solver_name))
+        kwargs = with_threads(solver_name, kwargs, solver_threads)
         kwargs["solver"] = solver_name
 
         try:
-            problem.solve(**kwargs)
+            with limited_threads(solver_threads):
+                problem.solve(**kwargs)
         except Exception as exc:  # pragma: no cover - solver availability varies by environment
             last_exception = exc
             failure_details.append(f"{solver_name}: {exc}")

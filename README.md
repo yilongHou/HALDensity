@@ -38,6 +38,17 @@ Or install directly from GitHub:
 pip install "git+https://github.com/yilongHou/HALDensity.git"
 ```
 
+Parallel runs and shared servers
+
+Every solver call is single-threaded by default: MOSEK (`MSK_IPAR_NUM_THREADS`), CLARABEL (`max_threads`)
+and, for the duration of the call, the BLAS/OpenMP pools of numpy and scipy (through `threadpoolctl`);
+SCS and ECOS are single-threaded anyway. Without this, one CLARABEL solve used 109 cores of a
+256-core server and ran 4 times slower than on one thread. Run parallel work as separate single-threaded
+processes. Raise the count only when one fit runs alone on a dedicated machine:
+`CVXPYEstimator(solver_threads=8)` (or `estimator_kwargs={"solver_threads": 8}` in the tuner). numpy and
+scipy calls outside the solvers keep numpy's own setting, so for many parallel workers also export
+`OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1` before starting Python.
+
 Quickstart
 
 ```python

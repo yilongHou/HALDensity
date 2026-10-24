@@ -75,6 +75,15 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   Gaussian mixture, n = 400 and 1,280, k = 1 and 2): basis 1,121-1,257 -> 5-33 functions at
   n = 1,280; mean SE / Monte Carlo sd 1.11-2.76 -> 0.80-1.25; coverage of the truth 85-100%
   (median 100%) -> 83-99% (median 94%).
+- **Solver calls are single-threaded by default** (`solver_threads=1`; Yilong, 2026-10-24, for
+  shared servers): per call through MOSEK's `MSK_IPAR_NUM_THREADS` and CLARABEL's `max_threads`,
+  and the numpy/scipy BLAS/OpenMP pools limited with `threadpoolctl` during the call; SCS and ECOS
+  are single-threaded. Applies to every estimator, since all solve through
+  `haldensity.core.solvers.solve_cvxpy_problem` or the final fit's ladder. Measured on a 256-core
+  server: an uncapped CLARABEL solve used 109 cores and was 4x slower than one thread; MOSEK used
+  5.6 cores (1.2 s against 1.6 s single-threaded). `CVXPYEstimator(solver_threads=k)` raises it;
+  `threadpoolctl` is now a direct dependency (it already came with scikit-learn). README: "Parallel
+  runs and shared servers".
 - **Knot cap on by default** (`CVXPYEstimator(max_knots="auto")`, Yilong 2026-10-24): at most
   K = 1,000 candidate knots for k >= 1 and K = max(1,000, ceil(n^(2/3))) for k = 0, at K data
   quantiles (`haldensity.core.univariate.objective.default_max_knots`). **Default results change for
