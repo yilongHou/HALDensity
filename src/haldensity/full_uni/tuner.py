@@ -20,10 +20,14 @@ import os
 from typing import Optional, Tuple, Any
 from datetime import datetime
 from scipy.interpolate import interp1d
+import warnings
 from tqdm import tqdm
 
 import optuna
 from sklearn.model_selection import KFold
+
+from haldensity.core.cv.conservative import SELECTION_RULES, bisection_search, conservative_threshold
+from haldensity.core.defaults import TUNER_DEFAULTS
 
 # Import estimators
 from haldensity.full_uni.estimators.cvxpy import CVXPYEstimator
@@ -75,6 +79,14 @@ class OptunaHyperparameterTuner:
         param_overrides: Optional[dict[str, Any]] = None,
         estimator_kwargs: Optional[dict[str, Any]] = None,
         cv_scoring: str = "exact",
+        use_conservative_adjustment: bool = TUNER_DEFAULTS.use_conservative_adjustment,
+        conservative_selection_rule: str = TUNER_DEFAULTS.conservative_selection_rule,
+        conservative_k_percent: float = TUNER_DEFAULTS.conservative_k_percent,
+        conservative_se_multiplier: float = TUNER_DEFAULTS.conservative_se_multiplier,
+        conservative_bracket_factor: float = TUNER_DEFAULTS.conservative_bracket_factor,
+        conservative_min_norm_constraint: float = TUNER_DEFAULTS.conservative_min_norm_constraint,
+        conservative_step_pct: float = TUNER_DEFAULTS.conservative_step_pct,
+        conservative_max_steps: int = TUNER_DEFAULTS.conservative_max_steps,
     ):
         """
         Initialize the hyperparameter tuner.
@@ -107,6 +119,19 @@ class OptunaHyperparameterTuner:
                 "interpolated": the pre-0.2.0 score, linear interpolation of get_density()
                 on its 200-point grid with a 1e-10 floor. Fully old behaviour also needs
                 estimator_kwargs={"normalizer": "midpoint"}.
+            use_conservative_adjustment: After the CV search, move to the smallest bound
+                (norm_constraint) whose mean CV log-likelihood is at least the threshold below the
+                best (haldensity.core.cv.conservative; bracketing then bisection in log M), as the
+                censored-data tuners do. On by default. Applies to estimators tuned by
+                norm_constraint (CVXPYEstimator) with metric "sll"; otherwise it is skipped and
+                `adjustment_note` says why. The CV-best parameters stay in `max_cv_params`. See
+                docs/dev/cvll-multicollinearity for why a flat CV curve makes this necessary.
+            conservative_selection_rule, conservative_k_percent, conservative_se_multiplier:
+                threshold = best - k_percent * SD ("legacy_percent_sd", default) or
+                best - se_multiplier * SD / sqrt(folds) ("one_se").
+            conservative_bracket_factor, conservative_min_norm_constraint, conservative_step_pct,
+            conservative_max_steps: search settings (shrink factor, floor, relative tolerance,
+                maximum CV evaluations).
         """
         if estimator_name not in ESTIMATORS:
             raise ValueError(f"Estimator '{estimator_name}' not supported. "
@@ -132,6 +157,18 @@ class OptunaHyperparameterTuner:
         self.param_overrides: dict[str, Any] = param_overrides or {}
         self.estimator_kwargs: dict[str, Any] = dict(estimator_kwargs or {})
         self.cv_scoring = cv_scoring
+        self.use_conservative_adjustment = bool(use_conservative_adjustment)
+        self.conservative_selection_rule = str(conservative_selection_rule).strip().lower()
+        if self.conservative_selection_rule not in SELECTION_RULES:
+            raise ValueError(f"conservative_selection_rule must be one of {SELECTION_RULES}")
+        self.conservative_k_percent = float(conservative_k_percent)
+        self.conservative_se_multiplier = float(conservative_se_multiplier)
+        self.conservative_bracket_factor = float(conservative_bracket_factor)
+        if not 0.0 < self.conservative_bracket_factor < 1.0:
+            raise ValueError("conservative_bracket_factor must be in (0, 1)")
+        self.conservative_min_norm_constraint = float(conservative_min_norm_constraint)
+        self.conservative_step_pct = float(conservative_step_pct)
+        self.conservative_max_steps = int(conservative_max_steps)
 
         # Cross-validation setup
         self.kfold = KFold(n_splits=cv_folds, shuffle=True, random_state=random_state)
@@ -143,7 +180,13 @@ class OptunaHyperparameterTuner:
         # Full keyword arguments of the best trial's estimator (tuned, fixed and estimator_kwargs)
         self.best_estimator_params: Optional[dict[str, Any]] = None
         self._trial_estimator_params: dict[int, dict[str, Any]] = {}
+        self._trial_fold_scores: dict[int, list[float]] = {}
         self._fold_errors: list[str] = []
+        # Conservative adjustment results
+        self.max_cv_params: Optional[dict[str, Any]] = None
+        self.conservative_params: Optional[dict[str, Any]] = None
+        self.adjustment_results: list[dict[str, Any]] = []
+        self.adjustment_note: Optional[str] = None
 
         if not silent:
             print(f"Initialized tuner for {estimator_name}")
@@ -428,6 +471,14 @@ class OptunaHyperparameterTuner:
         Returns:
             Average metric value across CV folds
         """
+        cv_scores = self._fold_scores(params)
+        if len(cv_scores) == 0:
+            # If all folds failed, return worst possible score
+            return -np.inf if self.metric == "sll" else np.inf
+        return np.mean(cv_scores)
+
+    def _fold_scores(self, params: dict[str, Any]) -> list[float]:
+        """Finite validation scores of the folds that succeeded (failures are recorded)."""
         cv_scores = []
         
         for fold_idx, (train_idx, val_idx) in enumerate(self.kfold.split(self.data)):
@@ -436,9 +487,12 @@ class OptunaHyperparameterTuner:
                 train_data = self.data.iloc[train_idx].reset_index(drop=True)
                 val_data = self.data.iloc[val_idx].reset_index(drop=True)
                 
-                # Create and fit estimator
+                # Create and fit estimator. CVXPY's "Solution may be inaccurate" notice is noise in
+                # the search (the status is recorded on the estimator); the final fit still shows it.
                 estimator = self.estimator_class(**params)
-                estimator.fit(train_data)
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("ignore", message="Solution may be inaccurate", category=UserWarning)
+                    estimator.fit(train_data)
                 
                 # Compute metric on validation set using density-based approach
                 if self.metric == "sll":
@@ -460,12 +514,9 @@ class OptunaHyperparameterTuner:
                 if not self.silent:
                     print(f"Warning: Error in fold {fold_idx}: {e}")
                 continue
-        
-        if len(cv_scores) == 0:
-            # If all folds failed, return worst possible score
-            return -np.inf if self.metric == "sll" else np.inf
-        
-        return np.mean(cv_scores)
+
+        self._last_fold_scores = list(cv_scores)
+        return cv_scores
     
     def _objective(self, trial: optuna.Trial) -> float:
         """
@@ -483,6 +534,7 @@ class OptunaHyperparameterTuner:
 
         # Evaluate using cross-validation
         metric_value = self._evaluate_params_cv(params)
+        self._trial_fold_scores[trial.number] = list(getattr(self, "_last_fold_scores", []))
         
         # Optuna minimizes, so negate SLL (which we want to maximize)
         if self.metric == "sll":
@@ -515,6 +567,9 @@ class OptunaHyperparameterTuner:
         
         self._fold_errors = []
         self._trial_estimator_params = {}
+        self._trial_fold_scores = {}
+        self.max_cv_params = self.conservative_params = self.adjustment_note = None
+        self.adjustment_results = []
 
         # Keep Optuna's per-trial INFO lines quiet during the search; restore the caller's level after.
         previous_verbosity = optuna.logging.get_verbosity()
@@ -579,6 +634,10 @@ class OptunaHyperparameterTuner:
             self.best_metric_value = -best_objective_value  # Convert back from negated
         else:
             self.best_metric_value = best_objective_value
+
+        self.max_cv_params = dict(self.best_estimator_params)
+        if self.use_conservative_adjustment:
+            self._apply_conservative_adjustment(self.study.best_trial.number)
         
         if not self.silent:
             print(f"\nOptimization completed!")
@@ -591,10 +650,58 @@ class OptunaHyperparameterTuner:
             "best_params": self.best_params,
             "best_estimator_params": self.best_estimator_params,
             "best_metric_value": self.best_metric_value,
+            "max_cv_params": self.max_cv_params,
+            "conservative_params": self.conservative_params,
+            "adjustment_results": self.adjustment_results,
             "n_trials": len(self.study.trials),
             "study": self.study
         }
     
+    def _apply_conservative_adjustment(self, best_trial_number: int) -> None:
+        """Move norm_constraint to the smallest value whose CV score clears the threshold."""
+        if self.metric != "sll":
+            self.adjustment_note = "skipped: the conservative adjustment is defined for metric='sll'"
+            return
+        if "norm_constraint" not in self.best_estimator_params:
+            self.adjustment_note = f"skipped: {self.estimator_name} is not tuned by norm_constraint"
+            return
+        best = dict(self.best_estimator_params)
+        best_scores = self._trial_fold_scores.get(best_trial_number, [])
+        best_mean = float(np.mean(best_scores)) if best_scores else float("-inf")
+        if not np.isfinite(best_mean):
+            self.adjustment_note = "skipped: the best trial has no finite fold score"
+            return
+        best_sd = float(np.std(best_scores, ddof=1)) if len(best_scores) >= 2 else 0.0
+        threshold, details = conservative_threshold(
+            best_mean=best_mean, best_sd=best_sd, n_valid=len(best_scores),
+            selection_rule=self.conservative_selection_rule, k_percent=self.conservative_k_percent,
+            se_multiplier=self.conservative_se_multiplier,
+        )
+        cache: dict[float, tuple[float, float]] = {float(best["norm_constraint"]): (best_mean, best_sd)}
+
+        def is_above(norm_constraint: float, step: int) -> bool:
+            nc = float(max(norm_constraint, self.conservative_min_norm_constraint))
+            if nc not in cache:
+                scores = self._fold_scores({**best, "norm_constraint": nc})
+                mean = float(np.mean(scores)) if scores else float("-inf")
+                cache[nc] = (mean, float(np.std(scores, ddof=1)) if len(scores) >= 2 else 0.0)
+            mean, sd = cache[nc]
+            above = bool(mean >= threshold)
+            self.adjustment_results.append(dict(step=int(step), norm_constraint=nc, cv_ll=mean, cv_sd=sd,
+                                                above_threshold=above, threshold=float(threshold), **details))
+            return above
+
+        chosen = bisection_search(
+            is_above, float(best["norm_constraint"]), bracket_factor=self.conservative_bracket_factor,
+            min_norm_constraint=self.conservative_min_norm_constraint, rel_tol=self.conservative_step_pct,
+            max_steps=self.conservative_max_steps,
+        )
+        self.conservative_params = {**best, "norm_constraint": float(chosen)}
+        self.best_estimator_params = dict(self.conservative_params)
+        if "norm_constraint" in self.best_params:
+            self.best_params["norm_constraint"] = float(chosen)
+        self.best_metric_value = cache.get(float(chosen), (self.best_metric_value,))[0]
+
     # Removed plotting functions: no visualization in this module
     
     def fit_best_model(self) -> Any:

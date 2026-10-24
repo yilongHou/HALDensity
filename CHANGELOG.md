@@ -61,6 +61,14 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
 
 ### Changed (behaviour)
 
+- Full-data CV applies the conservative adjustment (core, shared with the censored-data tuners
+  through `haldensity.core.cv.conservative`): after the search, the smallest bound whose mean CV
+  log-likelihood is within 5% of a fold SD of the best, found by bracketing and bisection in log M.
+  On by default for estimators tuned by `norm_constraint` (CVXPYEstimator), metric "sll";
+  `use_conservative_adjustment=False` restores the CV-best choice (kept in `max_cv_params`). In the
+  16 simulated datasets (k = 1, exact scoring): M shrank to 0.11-0.87 times the CV-best (median
+  0.72); held-out log-likelihood changed by -0.006 to +0.007 nats; L2 error fell in 5 of 16
+  (by 0.03-0.13 where CV had chosen a large M at n = 1,280) and rose in 11 (by 0.001-0.057).
 - Full-data CV scores each fold by evaluating the fitted log density exactly at the validation
   points (with the accurate normalizer) instead of linearly interpolating `get_density()` on its
   200-point grid. In 16 simulated datasets (4 densities, n = 400 and 1,280, k = 1) the selected

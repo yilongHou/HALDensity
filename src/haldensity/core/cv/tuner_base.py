@@ -19,6 +19,7 @@ import optuna
 from sklearn.model_selection import KFold
 
 from haldensity.core.defaults import EM_DEFAULTS, TUNER_DEFAULTS
+from haldensity.core.cv.conservative import bisection_search, conservative_threshold, cv_standard_error
 
 
 class TuningResult(NamedTuple):
@@ -38,45 +39,9 @@ class TuningResult(NamedTuple):
     metadata: Dict[str, Any]
 
 
-def _compute_cv_standard_error(sd_score: float, n_valid: int) -> float:
-    """Convert a fold-level SD into a standard error for the mean CV score."""
-    n = int(max(n_valid, 0))
-    if n <= 0 or not np.isfinite(sd_score):
-        return 0.0
-    return float(sd_score) / float(np.sqrt(n))
-
-
-def _compute_conservative_threshold(
-    *,
-    best_mean: float,
-    best_sd: float,
-    n_valid: int,
-    selection_rule: str,
-    k_percent: float,
-    se_multiplier: float,
-) -> tuple[float, dict[str, Any]]:
-    """Compute the conservative-selection threshold and diagnostics."""
-    rule = str(selection_rule).strip().lower()
-    if rule == "legacy_percent_sd":
-        threshold = float(best_mean - float(k_percent) * float(best_sd))
-        return threshold, {
-            "selection_rule": "legacy_percent_sd",
-            "k_percent": float(k_percent),
-            "best_sd": float(best_sd),
-            "best_standard_error": _compute_cv_standard_error(best_sd, n_valid),
-            "n_valid": int(n_valid),
-        }
-    if rule == "one_se":
-        best_se = _compute_cv_standard_error(best_sd, n_valid)
-        threshold = float(best_mean - float(se_multiplier) * best_se)
-        return threshold, {
-            "selection_rule": "one_se",
-            "se_multiplier": float(se_multiplier),
-            "best_sd": float(best_sd),
-            "best_standard_error": float(best_se),
-            "n_valid": int(n_valid),
-        }
-    raise ValueError("selection_rule must be one of {'legacy_percent_sd', 'one_se'}")
+# Shared with the full-data tuner; private aliases kept for existing importers.
+_compute_cv_standard_error = cv_standard_error
+_compute_conservative_threshold = conservative_threshold
 
 
 class BaseCensoredInitTuner(ABC):
@@ -394,60 +359,15 @@ class BaseCensoredInitTuner(ABC):
             return mean_ll, sd_ll, above
         
         self.adjustment_results = []
-        
-        # Step 0: Optuna best point (known above threshold by construction).
-        step = 0
-        eval_nc(optuna_nc, step=step)
-        step += 1
-        
-        # Bracket: shrink geometrically until we cross below threshold or hit min.
-        best_good_nc = float(optuna_nc)
-        bad_nc: Optional[float] = None
-        
-        while step <= self.conservative_max_steps:
-            cand = best_good_nc * self.conservative_bracket_factor
-            if cand <= self.conservative_min_norm_constraint:
-                best_good_nc = float(self.conservative_min_norm_constraint)
-                break
-            _, _, above = eval_nc(cand, step=step)
-            step += 1
-            if above:
-                best_good_nc = float(cand)
-                continue
-            bad_nc = float(cand)
-            break
-        
-        # If we never found a "bad" point, we already have the smallest good we reached.
-        if bad_nc is None:
-            self.conservative_params = {"norm_constraint": float(best_good_nc), "basis_order": int(basis_order)}
-            return self.conservative_params
-        
-        # Bisection in log-space between (bad_nc < good_nc).
-        good_nc = float(best_good_nc)
-        bad_nc = float(bad_nc)
-        
-        # Stop when interval is tight enough in relative terms.
-        rel_tol = float(max(self.conservative_step_pct, 1e-6))
-        
-        while step <= self.conservative_max_steps:
-            if good_nc <= self.conservative_min_norm_constraint:
-                good_nc = float(self.conservative_min_norm_constraint)
-                break
-            
-            # Relative gap: (good - bad)/good, note bad < good.
-            gap = (good_nc - bad_nc) / max(good_nc, self.conservative_min_norm_constraint)
-            if gap <= rel_tol:
-                break
-            
-            mid = float(np.exp((np.log(bad_nc) + np.log(good_nc)) / 2.0))
-            _, _, above = eval_nc(mid, step=step)
-            step += 1
-            if above:
-                good_nc = float(mid)  # move left (smaller) while staying above
-            else:
-                bad_nc = float(mid)   # move right (larger) to regain above
-        
-        self.conservative_params = {"norm_constraint": float(good_nc), "basis_order": int(basis_order)}
+        best_nc = bisection_search(
+            lambda nc, step: eval_nc(nc, step=step)[2],
+            float(optuna_nc),
+            bracket_factor=self.conservative_bracket_factor,
+            min_norm_constraint=self.conservative_min_norm_constraint,
+            rel_tol=self.conservative_step_pct,
+            max_steps=self.conservative_max_steps,
+        )
+        self.conservative_params = {"norm_constraint": float(best_nc), "basis_order": int(basis_order)}
         return self.conservative_params
     
     def _objective(self, trial: optuna.Trial) -> float:
