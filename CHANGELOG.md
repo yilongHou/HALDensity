@@ -24,6 +24,13 @@ The package is reorganized into one subpackage per data type plus a shared core:
 
 Class and function names are unchanged. Tests mirror the layout under `tests/<subpackage>/`.
 
+Old import paths keep working through 0.2.x as thin re-exports of the public names (156 names
+from `haldensity.censoring[.right|.interval|.tuners|.utils]`, `haldensity.estimation`,
+`haldensity.cross_validation`, `haldensity.targeting`, `haldensity.multivariate`,
+`haldensity.utils[.dgp]` and `haldensity.density_variance.density_variance`); importing them
+emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths (e.g.
+`haldensity.censoring.right.observed_mle`) and private names are not re-exported.
+
 ### Added
 
 - `haldensity.rc.fit_right_censored(method=...)` and `fit_ipcw_hal`, `fit_l1mle_m1`,
