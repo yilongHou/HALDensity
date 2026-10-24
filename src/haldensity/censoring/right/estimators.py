@@ -17,6 +17,7 @@ import pandas as pd
 from haldensity.estimation.base_estimator import BaseEstimator
 from haldensity.censoring._defaults import EMStageResult, EM_DEFAULTS
 from haldensity.censoring._base_mle import WeightedHALMLEEstimator
+from haldensity.censoring.right.fit import RightCensoredHALFit, last_failure_from_frame
 
 
 logger = logging.getLogger(__name__)
@@ -77,7 +78,17 @@ class RightCensoredInitEstimator(WeightedHALMLEEstimator):
     >>> est = RightCensoredInitEstimator(norm_constraint=50.0)
     >>> est.fit(pd.DataFrame({"W1": uncensored["T"]}), sample_weights=weights[data["Delta"] == 1])
     """
-    pass  # All functionality inherited from WeightedHALMLEEstimator
+    def fit(self, data: pd.DataFrame, *args: Any, **kwargs: Any) -> "RightCensoredInitEstimator":
+        """Fit as :meth:`WeightedHALMLEEstimator.fit` and record the last observed failure."""
+        super().fit(data, *args, **kwargs)
+        self._last_failure = last_failure_from_frame(data, fallback_col="W1")
+        return self
+
+    def get_fit(self) -> RightCensoredHALFit:
+        """Return the fitted distribution with frozen normalization constants and the last failure."""
+        if self._fit is None:
+            self._fit = RightCensoredHALFit.from_estimator(self)
+        return self._fit
 
 
 # =============================================================================

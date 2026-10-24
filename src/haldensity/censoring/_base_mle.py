@@ -15,7 +15,7 @@ import cvxpy as cp
 from haldensity.estimation.base_estimator import BaseEstimator
 from haldensity.utils.basis import create_basis_functions
 from haldensity.utils.cvxpy_solver import solve_cvxpy_problem
-from haldensity.censoring.right.fit import RightCensoredHALFit, last_failure_from_frame
+from haldensity.utils.hal_fit import HALFit
 
 
 logger = logging.getLogger(__name__)
@@ -97,8 +97,7 @@ class WeightedHALMLEEstimator(BaseEstimator):
         self._norm_shift: Optional[float] = None
         self._norm_Z: Optional[float] = None
         self._density_midpoints: Optional[np.ndarray] = None
-        self._last_failure: Optional[float] = None
-        self._rc_fit: Optional[RightCensoredHALFit] = None
+        self._fit: Optional[HALFit] = None
         self.solver_used_: Optional[str] = None
         self.problem_status_: Optional[str] = None
 
@@ -136,8 +135,7 @@ class WeightedHALMLEEstimator(BaseEstimator):
         if "W1" not in data.columns:
             raise ValueError("data must contain column 'W1'")
 
-        self._rc_fit = None
-        self._last_failure = last_failure_from_frame(data, fallback_col="W1")
+        self._fit = None
 
         x = np.asarray(data["W1"].values, dtype=float).ravel()
         n_samples = x.shape[0]
@@ -313,11 +311,11 @@ class WeightedHALMLEEstimator(BaseEstimator):
         }
         return self
 
-    def get_fit(self) -> RightCensoredHALFit:
+    def get_fit(self) -> HALFit:
         """Return the fitted distribution with frozen normalization constants."""
-        if self._rc_fit is None:
-            self._rc_fit = RightCensoredHALFit.from_estimator(self)
-        return self._rc_fit
+        if self._fit is None:
+            self._fit = HALFit.from_estimator(self)
+        return self._fit
 
     def _normalized_density(self, points: np.ndarray) -> np.ndarray:
         """Evaluate normalized density at points."""

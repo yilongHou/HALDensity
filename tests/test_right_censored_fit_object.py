@@ -215,3 +215,22 @@ def test_fit_object_rejects_mutation_and_invalid_state() -> None:
     bad_method = dict(state, normalizer_method="linspace")
     with pytest.raises(ValueError, match="normalizer_method"):
         RightCensoredHALFit.from_state(bad_method)
+
+
+def test_shared_weighted_mle_returns_generic_fit_and_rc_returns_subclass() -> None:
+    from haldensity.censoring._base_mle import WeightedHALMLEEstimator
+    from haldensity.utils.hal_fit import HALFit
+
+    data = _make_data()
+    uncensored = pd.DataFrame({"W1": data.loc[data["Delta"] == 1, "T"].to_numpy(dtype=float)})
+    base = WeightedHALMLEEstimator(norm_constraint=10.0, basis_order=1, n_grid_points=80).fit(uncensored)
+    generic = base.get_fit()
+    assert type(generic) is HALFit
+    assert "last_failure" not in generic.to_state()
+
+    rc_fit = _fit_ipcw(data).get_fit()
+    assert isinstance(rc_fit, RightCensoredHALFit) and isinstance(rc_fit, HALFit)
+    assert list(rc_fit.to_state())[:8] == [
+        "schema_version", "theta", "knots", "selected_knots",
+        "basis_order", "norm_shift", "norm_Z", "last_failure",
+    ]
