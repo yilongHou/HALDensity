@@ -6,7 +6,7 @@ Status: reference list, 2026-10-24. Each item says what was decided, when, and w
 
 | Setting | Decision | Why |
 | --- | --- | --- |
-| Search | Optuna TPE, 50 trials, M log-uniform on [1e-3, 1e6], 5 folds | HALDensity's defaults; confirmed 2026-10-23. Note: `OptunaHyperparameterTuner(cv_folds=...)` defaults to 3 in the code; to reconcile |
+| Search | Optuna TPE, 50 trials, M log-uniform on [1e-3, 1e6], 5 folds | HALDensity's defaults; confirmed 2026-10-23. 5 folds everywhere decided 2026-10-24: the full-data tuner's former default of 3 now follows the shared `TUNER_DEFAULTS.cv_folds = 5` (discrepancy resolved) |
 | **CV score** | **Exact held-out log-likelihood** (`cv_scoring="exact"`, default): exact evaluation at the validation points with the accurate normalizer (§4). `"interpolated"` keeps the old score | The old score interpolated 200 grid values and used a midpoint normalizer; for spiky fits it was inflated by up to 0.1 nats and picked absurd M (e.g. 9.9e5) |
 | A trial counts | Only if every fold fit qualifies; if no trial gets a finite score, raise an error (never return an arbitrary M) | A silent all-folds failure returned the first trial's M |
 | CV solver | The estimator's own solver defaults with the fallback ladder (§3), **at the default tolerance** (`OptunaHyperparameterTuner(cv_solver_tolerance="default")`) | CV only compares fitted values; tight tolerance in 250 solves costs time for no benefit (decided 2026-10-24) |

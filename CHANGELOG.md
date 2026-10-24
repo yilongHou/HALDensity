@@ -75,6 +75,9 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   Gaussian mixture, n = 400 and 1,280, k = 1 and 2): basis 1,121-1,257 -> 5-33 functions at
   n = 1,280; mean SE / Monte Carlo sd 1.11-2.76 -> 0.80-1.25; coverage of the truth 85-100%
   (median 100%) -> 83-99% (median 94%).
+- `OptunaHyperparameterTuner` uses 5 CV folds by default (`TUNER_DEFAULTS.cv_folds`, as the
+  censored-data tuners) instead of 3, so default full-data CV results change; `cv_folds=3` gives
+  the old split.
 - The final fit is one tight, certified solve (`CVXPYEstimator(solver_tolerance="tight")`, the
   new default): MOSEK with interior-point tolerances 1e-12 (relative gap, primal and dual
   feasibility), then CLARABEL 1e-12/1e-10, ECOS 1e-12/1e-10, SCS 1e-9 (`haldensity.core.solvers.

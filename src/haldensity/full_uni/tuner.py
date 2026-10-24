@@ -67,7 +67,7 @@ class OptunaHyperparameterTuner:
         self,
         estimator_name: str,
         data: pd.DataFrame,
-        cv_folds: int = 3,
+        cv_folds: int = TUNER_DEFAULTS.cv_folds,
         metric: str = "sll",
         random_state: int = 42,
         max_iter: int = 50_000,
@@ -95,7 +95,8 @@ class OptunaHyperparameterTuner:
         Args:
             estimator_name: Name of the estimator to tune
             data: Full dataset for cross-validation
-            cv_folds: Number of cross-validation folds
+            cv_folds: Number of cross-validation folds (default TUNER_DEFAULTS.cv_folds = 5, as the
+                censored-data tuners; 3 before 0.2.0)
             metric: Optimization metric ('sll' or 'bic')
             random_state: Random seed for reproducibility
             max_iter: Maximum iterations for iterative estimators
