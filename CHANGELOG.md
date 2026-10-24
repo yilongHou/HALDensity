@@ -75,6 +75,11 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   Gaussian mixture, n = 400 and 1,280, k = 1 and 2): basis 1,121-1,257 -> 5-33 functions at
   n = 1,280; mean SE / Monte Carlo sd 1.11-2.76 -> 0.80-1.25; coverage of the truth 85-100%
   (median 100%) -> 83-99% (median 94%).
+- Estimators that log no longer keep log files open: the file is opened only while a record is
+  written, and each estimator's logger is private instead of being registered with
+  `logging.getLogger` (which keeps every logger, and its open file, for the life of the process). In
+  0.1.0 each fit with logging on held one open file, about 250 per CV task (Yilong, 2026-10-24,
+  decision 9). Logs are still written to `log_dir` and started afresh for each estimator.
 - **Solver calls are single-threaded by default** (`solver_threads=1`; Yilong, 2026-10-24, for
   shared servers): per call through MOSEK's `MSK_IPAR_NUM_THREADS` and CLARABEL's `max_threads`,
   and the numpy/scipy BLAS/OpenMP pools limited with `threadpoolctl` during the call; SCS and ECOS

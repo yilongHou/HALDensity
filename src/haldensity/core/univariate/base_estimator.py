@@ -27,6 +27,23 @@ class CommonEstimatorResults(BaseModel):
 NORMALIZERS = ("gauss_legendre", "midpoint")
 
 
+class _AppendPerRecordHandler(logging.Handler):
+    """Writes each record by opening ``path`` in append mode and closing it again: no handle is kept
+    between records, so estimators that log do not accumulate open files (one per fit before 0.2.0)."""
+
+    def __init__(self, path: str, level: int = logging.INFO):
+        super().__init__(level)
+        self.path = path
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            message = self.format(record)
+            with open(self.path, "a", encoding="utf-8") as stream:
+                stream.write(message + "\n")
+        except Exception:
+            self.handleError(record)
+
+
 class BaseEstimator:
     """Lightweight base providing logging, density utilities, and common result helpers."""
     
@@ -88,39 +105,19 @@ class BaseEstimator:
             self._setup_logging()
     
     def _setup_logging(self):
-        """Setup a dedicated logger for the estimator instance."""
-        # Ensure the log directory exists.
-        os.makedirs(os.path.dirname(self.log_dir), exist_ok=True)
-
-        # Create a unique logger name for this instance to avoid conflicts.
-        logger_name = f"{self.__class__.__name__}-{id(self)}"
-        self.logger = logging.getLogger(logger_name)
-        
-        # Prevent messages from propagating to the root logger.
+        """A dedicated logger for this estimator instance, writing to ``log_dir`` (the file is started
+        afresh here, as before). The file is opened only while a record is written, and the logger is
+        private (not registered with ``logging.getLogger``, whose table keeps every logger for the life
+        of the process), so it goes away with the estimator."""
+        os.makedirs(os.path.dirname(self.log_dir) or ".", exist_ok=True)
+        self.logger = logging.Logger(f"{self.__class__.__name__}-{id(self)}", logging.INFO)
         self.logger.propagate = False
-        
-        # Set the logging level.
-        self.logger.setLevel(logging.INFO)
+        with open(self.log_dir, "w", encoding="utf-8"):
+            pass                                        # overwrite previous logs, as mode "w" did
+        handler = _AppendPerRecordHandler(self.log_dir)
+        handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+        self.logger.addHandler(handler)
 
-        # If handlers are already present, clear them to avoid duplicate logs.
-        if self.logger.hasHandlers():
-            for handler in list(self.logger.handlers):
-                try:
-                    handler.close()
-                finally:
-                    self.logger.removeHandler(handler)
-
-        # Create a file handler to write to the specified log file (overwriting previous logs).
-        file_handler = logging.FileHandler(self.log_dir, mode='w')
-        file_handler.setLevel(logging.INFO)
-
-        # Create a formatter and set it for the handler.
-        formatter = logging.Formatter('%(asctime)s - %(message)s')
-        file_handler.setFormatter(formatter)
-
-        # Add the handler to the logger.
-        self.logger.addHandler(file_handler)
-    
     def fit(self, data: pd.DataFrame, **kwargs) -> 'BaseEstimator':
         """Fit the estimator to data (must be implemented by subclasses)."""
         raise NotImplementedError("Subclasses must implement fit().")
