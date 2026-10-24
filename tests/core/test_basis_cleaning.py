@@ -135,14 +135,17 @@ def test_repair_by_polishing_recovers_the_certified_solution(data, refit):
     np.testing.assert_allclose(problem.objective(fixed["theta_raw"]), problem.objective(refit.theta_raw), rtol=1e-8)
 
 
-def test_repair_is_not_applied_to_large_violations(data, refit):
+def test_zeroing_is_limited_to_small_violations_polishing_is_not(data, refit):
     from haldensity.core.univariate.support import repair_support
     problem = FullDataHALProblem(data, basis_order=1)
     theta = refit.theta_raw.copy()
     inactive = 2 + np.flatnonzero(np.abs(theta[2:]) <= 1e-8)[:5]
     theta[inactive] = 0.5                      # 2.5 of the L1 norm 20 sits on coefficients that should be zero
-    fixed = repair_support(problem, theta, refit.norm_constraint)
-    assert not fixed["applied"] and not fixed["certified"] and "L1 norm" in fixed["reason"]
+    zeroed = repair_support(problem, theta, refit.norm_constraint, polish=False)
+    assert not zeroed["applied"] and not zeroed["certified"] and "L1 norm" in zeroed["reason"]
+    # polishing re-solves exactly on the near-active support, so the size removed does not matter
+    polished = repair_support(problem, theta, refit.norm_constraint, polish=True)
+    assert polished["certified"] and polished["removed"] == 5 and polished["removed_share"] > 0.1
 
 
 def test_certified_solve_repairs_only_when_asked(monkeypatch, data, refit):

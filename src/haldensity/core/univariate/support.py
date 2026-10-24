@@ -22,9 +22,9 @@ certifies the result with :func:`kkt_report`:
 * a kept coordinate is violating when |gradient_j| < 0.99 lambda;
 * the support is certified when none is violating and no knot coordinate has
   |gradient_j| > 1.01 lambda;
-* if lambda / n <= 1e-5 the bound is not binding (lambda = 0) and the solution
-  is certified when max_j |gradient_j| / n <= 1e-5; otherwise the bound must
-  also be binding, ||theta[1:]||_1 >= (1 - 1e-3) M.
+* if ||theta[1:]||_1 < (1 - 1e-3) M the bound is not binding (lambda = 0) and
+  the solution is certified when max_j |gradient_j| / n <= 1e-5 (the 1e-3
+  covers MOSEK's near-optimal stop, e.g. at 0.99978 M).
 
 The same routine (:func:`certified_solve`, MOSEK 1e-12 first) is the final fit
 of ``CVXPYEstimator(solver_tolerance="tight")``, its default: there the
@@ -72,12 +72,12 @@ RESIDUE_FLOOR = 1e-8
 KKT_SLACK = 0.99
 MAX_RATIO = 1.01
 BIG_FRACTION = 0.1
-SLACK_GRADIENT_TOL = 1e-5    # lambda / n at most this: the bound is not binding; then certified when
-                             # max |gradient_j| / n is at most this too
-ACTIVE_BOUND = 1e-3          # a binding bound needs ||theta[1:]||_1 >= (1 - this) * M
+ACTIVE_BOUND = 1e-3          # ||theta[1:]||_1 below (1 - this) * M: the bound is not binding ...
+SLACK_GRADIENT_TOL = 1e-5    # ... and the solution is certified when max |gradient_j| / n is at most this
 # Proposed repair of an uncertified final fit (repair_support; not used by default)
 REPAIR_MAX_SHARE = 0.01      # the coefficients set to zero may hold at most this share of ||theta[1:]||_1
-REPAIR_MAX_ROUNDS = 5        # polish: re-solve on the support at most this often
+REPAIR_MAX_ROUNDS = 10       # polish: re-solve on the support at most this often
+REPAIR_START_SIZE = 200      # polish: start from at most this many of the largest near-active coefficients
 REPAIR_MAX_SUPPORT = 2000    # polish: largest support solved directly
 REPAIR_ADD_PER_ROUND = 100   # polish: most coordinates added to the support per round
 _OK_STATUSES = ("optimal", "optimal_inaccurate")
@@ -212,17 +212,14 @@ def kkt_report(problem: FullDataHALProblem, theta: np.ndarray, prune: float = PR
     common = dict(n_knots=int(problem.knots.size), n_kept=int(kept.sum()),
                   n_residue=int(np.sum((np.abs(knot_theta) > RESIDUE_FLOOR) & ~kept)), l1_raw=l1_raw,
                   max_gradient_per_obs=max_gradient)
-    if norm_constraint is not None and lam / max(problem.n, 1) <= SLACK_GRADIENT_TOL:
-        # multiplier ~ 0: the bound is not binding, so the whole gradient must vanish
+    if norm_constraint is not None and l1_raw < (1.0 - ACTIVE_BOUND) * float(norm_constraint):
+        # the bound is not binding: lambda = 0, so the whole gradient must vanish
         return dict(bound="slack", lambda_hat=lam, n_kept_violating=0, n_near_active=0, max_ratio=float("nan"),
                     certified=bool(max_gradient <= SLACK_GRADIENT_TOL), **common)
     ratio = np.abs(knot_gradient) / lam if lam > 0 else np.full(knot_gradient.shape, np.nan)
     violating = int(np.sum(kept & (ratio < slack)))
     max_ratio = float(np.nanmax(ratio)) if ratio.size and np.any(np.isfinite(ratio)) else float("nan")
     certified = violating == 0 and (not np.isfinite(max_ratio) or max_ratio <= MAX_RATIO)
-    if norm_constraint is not None:
-        # lambda > 0 needs the bound to be binding (complementary slackness)
-        certified = certified and l1_raw >= (1.0 - ACTIVE_BOUND) * float(norm_constraint)
     return dict(bound="active" if norm_constraint is not None else "assumed active", lambda_hat=lam,
                 n_kept_violating=violating, n_near_active=int(np.sum(ratio >= slack)), max_ratio=max_ratio,
                 certified=bool(certified), **common)
@@ -261,17 +258,23 @@ class SupportRefit:
 
 
 def repair_support(problem: FullDataHALProblem, theta: np.ndarray, norm_constraint: float, *,
-                   polish: bool = True, prune: float = PRUNE, max_share: float = REPAIR_MAX_SHARE,
+                   polish: bool = True, prune: float = PRUNE, max_share: Optional[float] = None,
                    ladder: tuple[tuple[str, str, dict[str, Any]], ...] = LADDER) -> dict[str, Any]:
     """Proposed rule (not the default) for a solution that fails the optimality check at a binding bound.
 
     The kept coefficients whose gradient is below 0.99 lambda (the conditions say they are zero) are set
-    to zero if together they hold at most ``max_share`` of ||theta[1:]||_1. ``polish=False``: the check
-    is re-run on that vector. ``polish=True``: the problem is re-solved on the remaining support and
-    checked against the full gradient; coordinates the check says are missing (gradient above 1.01
-    lambda) are added and the support re-solved, at most ``REPAIR_MAX_ROUNDS`` times. Returns the
-    repaired raw solution, its check, and how many coefficients were removed or added (and their size).
+    to zero. ``polish=False`` ("zero"): only if together they hold at most ``max_share`` (default
+    ``REPAIR_MAX_SHARE`` = 1%) of ||theta[1:]||_1; the check is re-run on that vector. ``polish=True``:
+    the problem is re-solved on the remaining support (the near-active coefficients) and checked against
+    the full gradient (active set: start from at most ``REPAIR_START_SIZE`` of the largest of them;
+    after each re-solve keep the coefficients that stay nonzero and pass, add up to
+    ``REPAIR_ADD_PER_ROUND`` that the check says are missing, gradient above 1.01 lambda; at most
+    ``REPAIR_MAX_ROUNDS`` re-solves). A certified result is optimal however
+    much was removed, so no share limit applies unless ``max_share`` is given. Returns the repaired raw
+    solution, its check, and how many coefficients were removed or added (and their size).
     """
+    if max_share is None and not polish:
+        max_share = REPAIR_MAX_SHARE
     started = perf_counter()
     theta = np.asarray(theta, dtype=float)
     M = float(norm_constraint)
@@ -291,7 +294,8 @@ def repair_support(problem: FullDataHALProblem, theta: np.ndarray, norm_constrai
     low = kept & (ratio < KKT_SLACK)
     l1 = float(np.abs(theta[1:]).sum())
     share = float(np.abs(knot_theta[low]).sum()) / l1 if l1 > 0 else 0.0
-    if share > max_share:
+    out["removed_share"] = share
+    if max_share is not None and share > max_share:
         out.update(reason=f"the coefficients to zero hold {share:.3g} of the L1 norm", removed_share=share,
                    seconds=perf_counter() - started)
         return out
@@ -302,6 +306,8 @@ def repair_support(problem: FullDataHALProblem, theta: np.ndarray, norm_constrai
         out.update(applied=True, certified=rep["certified"], theta_raw=candidate, kkt=rep)
     else:
         support = np.flatnonzero(kept & ~low)
+        if support.size > REPAIR_START_SIZE:            # active-set start: the largest near-active coefficients
+            support = support[np.argsort(-np.abs(knot_theta[support]))[:REPAIR_START_SIZE]]
         for rounds in range(1, REPAIR_MAX_ROUNDS + 1):
             if support.size > REPAIR_MAX_SUPPORT:
                 out["reason"] = f"support of {support.size} knots too large to polish"
@@ -317,13 +323,15 @@ def repair_support(problem: FullDataHALProblem, theta: np.ndarray, norm_constrai
                 break
             lam = rep["lambda_hat"]
             new_ratio = np.abs(problem.gradient(solved)[first:]) / lam if lam > 0 else np.zeros(knot_theta.size)
+            nonzero = np.abs(solved[first:]) > prune
+            keep = support[nonzero[support] & (new_ratio[support] >= KKT_SLACK)]
             outside = np.setdiff1d(np.arange(knot_theta.size), support)
             missing = outside[new_ratio[outside] > MAX_RATIO]
-            if not missing.size:
-                out["reason"] = "uncertified with nothing to add"
-                break
             add = missing[np.argsort(-new_ratio[missing])][:REPAIR_ADD_PER_ROUND]
-            support = np.union1d(support, add)
+            if not add.size and keep.size == support.size:
+                out["reason"] = "uncertified with nothing to add or drop"
+                break
+            support = np.union1d(keep, add)
     final = np.abs(out["theta_raw"][first:]) > prune
     out.update(removed=int(np.sum(kept & ~final)), removed_l1=float(np.abs(knot_theta[kept & ~final]).sum()),
                added=int(np.sum(~kept & final)), seconds=perf_counter() - started)
