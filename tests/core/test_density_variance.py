@@ -90,12 +90,14 @@ def _squeezed(results, data, k, s):
     return {"theta_hat": theta, "data_points": knots}, pd.DataFrame({"W1": data["W1"] * s})
 
 
+@pytest.mark.parametrize("s", [0.08, 0.001])
 @pytest.mark.parametrize("k", [0, 1, 2])
-def test_the_scaled_floor_does_not_depend_on_units(k):
-    # round 2 (Yilong, 2026-10-24): a ridge of floor * (each column's own score variance) has no units
+def test_the_scaled_floor_does_not_depend_on_units(k, s):
+    # round 2 (Yilong, 2026-10-24): a ridge of floor * (each column's own score variance) has no units; s = 0.001
+    # also checks that the intercept is dropped whatever the units (its centred score is zero only to rounding)
     data, estimator = _fit(k)
     results = estimator.get_results()
-    x, s = np.linspace(0.05, 0.6, 5), 0.08
+    x = np.linspace(0.05, 0.6, 5)
     squeezed, squeezed_data = _squeezed(results, data, k, s)
 
     def se(res, d, points, support, **options):
@@ -114,3 +116,14 @@ def test_the_scaled_floor_does_not_depend_on_units(k):
         assert np.max(np.abs(rescaled["se"] * s / original["se"] - 1)) > 1e-3
     cov = estimate_covariance_beta(data, results, basis_order=k, support_refit=None, _inverse="scaled_floor")
     assert np.all(cov[0] == 0)                            # the intercept's centred score is zero: dropped
+
+
+def test_constant_columns_are_found_relative_to_each_column():
+    from haldensity.core.variance import _constant_columns
+    rng = np.random.default_rng(5)
+    basis = np.column_stack([np.ones(50), rng.uniform(size=50), 1e-6 * rng.uniform(size=50)])
+    scores = basis - basis.mean(axis=0)
+    scores[:, 0] = 1e-16                                  # the intercept's centred score: rounding only
+    assert _constant_columns(basis, scores).tolist() == [True, False, False]       # a tiny column is not constant
+    scaled = basis * np.array([1.0, 1e-4, 1e-4])
+    assert _constant_columns(scaled, scores * np.array([1.0, 1e-4, 1e-4])).tolist() == [True, False, False]

@@ -113,14 +113,15 @@ def _theta_for_se(estimation_results: dict, support_refit: Optional[SupportRefit
 
 
 INVERSES = ("ridge", "cutoff", "scaled_floor")
-# a column whose centred score has an RMS below this fraction of the largest is constant (the intercept)
+# a column whose centred score has an RMS below this fraction of the column's own RMS is constant (the
+# intercept; relative to the column itself, so the test does not depend on the data's units)
 CONSTANT_COLUMN_TOL = 1e-12
 INFORMATIONS = ("empirical", "model")
 
 
 def _covariance_from_information(information: np.ndarray, root: Optional[np.ndarray], n_samples: int,
                                  inverse: str, ridge_param: float, relative_cutoff: float,
-                                 floor: float = 1e-6) -> np.ndarray:
+                                 floor: float = 1e-6, constant: Optional[np.ndarray] = None) -> np.ndarray:
     """Cov(beta-hat) = information^{-1} / n.
 
     "ridge": the inverse of information + ridge_param * I (an absolute ridge, the package default).
@@ -129,12 +130,13 @@ def _covariance_from_information(information: np.ndarray, root: Optional[np.ndar
     direction is exactly zero), so no constant depends on the scale of the basis functions.
     "scaled_floor": the information scaled to unit diagonal, R = D^-1 I D^-1 with d_j the RMS of the centred
     score of column j, and Cov = D^-1 (R + floor * I)^-1 D^-1 / n, i.e. a ridge of floor * d_j^2 on coordinate
-    j: no units, so the SE does not change when the data's units do. Columns whose centred score is zero (the
-    intercept, and any column constant on the support) are dropped: their rows and columns of Cov are zero.
+    j: no units, so the SE does not change when the data's units do. The ``constant`` columns (the intercept,
+    whose centred score is zero, and any other column constant on the data; :func:`_constant_columns`) are
+    dropped: their rows and columns of Cov are zero.
     """
     if inverse == "scaled_floor":
         scale = np.sqrt(np.clip(np.diag(information), 0.0, None))
-        keep = scale > CONSTANT_COLUMN_TOL * scale.max(initial=0.0)
+        keep = scale > 0 if constant is None else ~np.asarray(constant, dtype=bool)
         outer = np.outer(scale[keep], scale[keep])
         covariance = np.zeros_like(information)
         covariance[np.ix_(keep, keep)] = (np.linalg.inv(information[np.ix_(keep, keep)] / outer
@@ -152,6 +154,17 @@ def _covariance_from_information(information: np.ndarray, root: Optional[np.ndar
     keep = eigenvalues > relative_cutoff * eigenvalues.max(initial=0.0)
     directions = vt[keep].T
     return (directions / eigenvalues[keep]) @ directions.T / n_samples
+
+
+def _constant_columns(basis_at_data: np.ndarray, scores: np.ndarray) -> np.ndarray:
+    """Columns to drop: the intercept (column 0, its centred score is zero up to rounding) and any column whose
+    centred score is negligible against the column itself, a test that does not depend on the data's units (a
+    threshold relative to the other columns would: squeezing the data shrinks them, not the rounding residue)."""
+    rms_basis = np.sqrt(np.mean(basis_at_data ** 2, axis=0))
+    rms_scores = np.sqrt(np.mean(scores ** 2, axis=0))
+    constant = rms_scores <= CONSTANT_COLUMN_TOL * rms_basis
+    constant[0] = True
+    return constant
 
 
 def _model_information_root(theta_hat_full: np.ndarray, knots: np.ndarray, basis_order: int,
@@ -225,7 +238,8 @@ def estimate_covariance_beta(
         root = scores / np.sqrt(n_samples)
         information = (scores.T @ scores) / n_samples
     covariance_matrix = _covariance_from_information(information, root, n_samples, _inverse, ridge_param,
-                                                     _relative_cutoff, _floor)
+                                                     _relative_cutoff, _floor,
+                                                     _constant_columns(basis_matrix_selected, scores))
 
     covariance = covariance_matrix.view(BasisCovariance)
     covariance.support_refit = support_refit
