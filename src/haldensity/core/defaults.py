@@ -20,6 +20,14 @@ from pydantic import BaseModel, ConfigDict
 # slope-kink, curvature-kink and smooth truths), and an order higher than the truth's costs little.
 DEFAULT_BASIS_ORDER = 2
 
+# Fitting grid of the full-data univariate HAL-MLE: n_grid_points - 1 equal cells of [0, 1] (public; whether
+# the data are too concentrated for it is the user's call, Yilong 2026-10-24). Every fit records the
+# missed-mass diagnostic, the accurate log Z minus the objective's log Z, and warns above
+# MISSED_MASS_WARNING_NATS, suggesting about MISSED_MASS_CELLS_ACROSS_DATA cells across the data range.
+DEFAULT_N_GRID_POINTS = 200
+MISSED_MASS_WARNING_NATS = 0.01
+MISSED_MASS_CELLS_ACROSS_DATA = 200
+
 
 class EMDefaults(BaseModel):
     """Default parameters for EM algorithm.

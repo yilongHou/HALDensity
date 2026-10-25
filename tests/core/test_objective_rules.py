@@ -51,6 +51,7 @@ def test_the_default_is_the_rule_of_the_order(k, explicit, rule):
     assert results["objective_rule"] == rule and results["objective_normalizer"] == explicit
 
 
+@pytest.mark.filterwarnings("ignore:The fitting objective missed:UserWarning")  # the old midpoint rule, forced
 def test_the_choice_is_not_a_user_option():
     import inspect
     public = [name for name in inspect.signature(CVXPYEstimator).parameters if not name.startswith("_")]

@@ -86,6 +86,25 @@ res = tuner.optimize(n_trials=50)
 best_est = tuner.fit_best_model()
 ```
 
+Data in a small part of [0, 1]
+
+The estimators work on [0, 1]; rescale the data by bounds fixed in advance (not the sample's minimum and
+maximum). At order 2 (the default) the objective is normalized on a fitting grid of `n_grid_points - 1`
+equal cells (default 200). If the data occupy only a small part [a, b] of [0, 1], few cells cover them and
+the objective can miss part of the fitted mass. Raise the grid to about `200 / (b - a)`, so that about 200
+cells cover the data, and give the tuner the same grid, so that every CV fold and the final fit use it:
+
+```python
+est = CVXPYEstimator(norm_constraint=..., n_grid_points=1000)
+tuner = OptunaHyperparameterTuner("CVXPYEstimator", data, estimator_kwargs={"n_grid_points": 1000})
+```
+
+Every fit records the missed mass, `get_results()["log_z_gap"]` (the accurate log normalizer minus the
+objective's, in nats), and warns above 0.01 nats with a suggested `n_grid_points`. Example: the galaxy
+velocities divided by 3e5 occupy 8% of [0, 1]. At k = 2 and the CV choice M = 596,793, the default grid's
+objective sees 93.8% of the fitted mass and the main peak is 80.7; with 1,000 points it sees all of it and
+the peak is 65.2 (the same with 2,000), and a 5-fold CV trial takes 0.84 s instead of 0.20 s.
+
 Targeted Learning (TMLE)
 
 ```python

@@ -88,22 +88,36 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   `upper`, each with a warning that suggests a bootstrap or another solver; before, the SE was
   computed on that basis with a warning. `support_refit=None` still gives the original-basis SE.
 - **Numerical options are the package's choice** (Yilong, 2026-10-24). Public options of
-  `CVXPYEstimator`: `norm_constraint`, `basis_order`, `max_knots` (None = every knot), `solver_threads`,
-  `log_dir`, `log_frequency`; of `OptunaHyperparameterTuner`: `cv_folds`, `metric`, `random_state`,
+  `CVXPYEstimator`: `norm_constraint`, `basis_order`, `max_knots` (None = every knot), `n_grid_points`
+  (the one exception, see the next item), `solver_threads`, `log_dir`, `log_frequency`; of
+  `OptunaHyperparameterTuner`: `cv_folds`, `metric`, `random_state`,
   `max_iter` and `tolerance` (first-order estimators), `log_frequency`, `silent`, `show_progress`,
   `param_overrides`, `estimator_kwargs`, `use_conservative_adjustment` and its margin settings; of the
   variance functions: `support_refit` and `alpha`. Options that were public in 0.1.0 still work through
   0.2.x with a `DeprecationWarning` naming the internal replacement and are removed in 0.3.0:
-  `CVXPYEstimator(tol, n_grid_points, solver, use_secondary_solver, solver_waterfall)` -> `_tol`,
-  `_n_grid_points`, `_solver`, `_use_secondary_solver`, `_solver_waterfall`;
-  `estimate_covariance_beta(ridge_param)` -> `_ridge_param`; `OptunaHyperparameterTuner(n_grid_points)`
-  had no effect and only warns. Options added during the restructure are internal directly:
+  `CVXPYEstimator(tol, solver, use_secondary_solver, solver_waterfall)` -> `_tol`, `_solver`,
+  `_use_secondary_solver`, `_solver_waterfall`; `estimate_covariance_beta(ridge_param)` -> `_ridge_param`.
+  Options added during the restructure are internal directly:
   `_normalizer`, `_solver_tolerance`, `_objective_normalizer` (estimator), `_cv_scoring`,
   `_cv_solver_tolerance` and the conservative search's `_conservative_bracket_factor`,
   `_conservative_min_norm_constraint`, `_conservative_step_pct`, `_conservative_max_steps` (tuner).
   Internal names are for tests, benchmarks and experiment repositories. Arguments after `data`
   (tuner) and all estimator arguments are keyword-only, so a 0.1.0 positional call fails loudly
   instead of shifting values.
+- **The fitting grid `n_grid_points` is public, with a missed-mass warning** (Yilong, 2026-10-24; full
+  data, univariate): whether the data are too concentrated for the default grid is the user's call, the one
+  exception to "numerical options are internal"; the default stays 200. The tuner gives every CV fold and
+  the final fit the same grid through `estimator_kwargs={"n_grid_points": ...}`; its own 0.1.0 option
+  `n_grid_points`, which never reached the estimators, is passed on there with a `DeprecationWarning`
+  (removed in 0.3.0). Every fit records the missed-mass diagnostic `get_results()["log_z_gap"]`
+  (`log_z_gap_`): the accurate log normalizer minus the objective's, in nats, at the point estimate. Above
+  0.01 nats the fit warns and suggests `n_grid_points` of about 200 / (max x - min x), 200 cells across the
+  data (silent inside CV folds; the final fit shows it). Galaxies (v / 3e5, 8% of [0, 1]; k = 2, MOSEK, the
+  case study's M = 596,793): with 200 points the gap is 0.064 nats (the objective saw 93.8% of the fitted
+  mass), the main peak 80.7 and the exact 5-fold CV score 3.1670; with 1,000 points the gap is 0, the peak
+  65.2 and the score 3.1792; with 2,000 the gap is 0, the peak 65.2 and the score 3.1794. One 5-fold CV
+  trial at that M takes 0.20, 0.84 and 1.74 s. Default results are unchanged; the old midpoint rule forced
+  at k = 0 with M = 20 (internal hook) sees only 12.5% of its fitted mass and now warns.
 - **Internal safeguard at k = 0** (Yilong, 2026-10-24; `haldensity.core.univariate.imbalance`): every
   k = 0 fit records coefficient-imbalance diagnostics in `get_results()["imbalance"]`, and the final
   fit warns if adjacent selected knots less than 1e-3 apart carry opposite-sign coefficients both

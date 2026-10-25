@@ -57,6 +57,7 @@ def test_tight_ladder_follows_the_solver_settings():
 
 
 @pytest.mark.parametrize("k,normalizer,M", CASES)
+@pytest.mark.filterwarnings("ignore:The fitting objective missed:UserWarning")  # the old midpoint rule, forced
 def test_the_final_fit_is_the_old_cleaned_basis(data, k, normalizer, M):
     # v0.1.0 fit + separate cleaning refit (free solvers, as before MOSEK joined the ladder) ...
     old = CVXPYEstimator(norm_constraint=M, basis_order=k, _objective_normalizer=normalizer, log_frequency=-1,

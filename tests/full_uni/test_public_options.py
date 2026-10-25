@@ -19,8 +19,9 @@ def _data(n=120):
 
 
 def test_public_signatures():
-    assert _public(CVXPYEstimator) == ["norm_constraint", "basis_order", "max_knots", "solver_threads", "log_dir",
-                                       "log_frequency"]
+    # n_grid_points is public again (Yilong, 2026-10-24): whether the data are too concentrated is the user's call
+    assert _public(CVXPYEstimator) == ["norm_constraint", "basis_order", "max_knots", "n_grid_points",
+                                       "solver_threads", "log_dir", "log_frequency"]
     assert _public(OptunaHyperparameterTuner) == [
         "estimator_name", "data", "cv_folds", "metric", "random_state", "max_iter", "tolerance", "log_frequency",
         "silent", "show_progress", "param_overrides", "estimator_kwargs", "use_conservative_adjustment",
@@ -28,7 +29,7 @@ def test_public_signatures():
     assert _public(estimate_covariance_beta) == ["data", "estimation_results", "basis_order", "support_refit"]
 
 
-@pytest.mark.parametrize("old,value,attribute", [("tol", 1e-3, "tol"), ("n_grid_points", 150, "n_grid_points"),
+@pytest.mark.parametrize("old,value,attribute", [("tol", 1e-3, "tol"),
                                                  ("solver", "CLARABEL", "solver"),
                                                  ("use_secondary_solver", False, "use_secondary_solver"),
                                                  ("solver_waterfall", ["ECOS"], "solver_waterfall")])
@@ -40,8 +41,9 @@ def test_estimator_options_of_0_1_0_warn_and_still_work(old, value, attribute):
 
 
 def test_tuner_and_variance_options_of_0_1_0_warn_and_still_work():
-    with pytest.warns(DeprecationWarning, match="no effect"):
-        OptunaHyperparameterTuner("CVXPYEstimator", _data(), n_grid_points=300)
+    with pytest.warns(DeprecationWarning, match="estimator_kwargs"):
+        tuner = OptunaHyperparameterTuner("CVXPYEstimator", _data(), n_grid_points=300)
+    assert tuner.estimator_kwargs == {"n_grid_points": 300}       # passed on (it had no effect in 0.1.0)
     data = _data()
     fit = CVXPYEstimator(norm_constraint=10.0, basis_order=1, log_frequency=-1).fit(data)
     results = fit.get_results()

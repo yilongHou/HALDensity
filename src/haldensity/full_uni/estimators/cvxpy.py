@@ -3,7 +3,12 @@ import pandas as pd
 import cvxpy as cp
 import warnings
 from typing import Optional, Sequence, Union
-from haldensity.core.defaults import DEFAULT_BASIS_ORDER
+from haldensity.core.defaults import (
+    DEFAULT_BASIS_ORDER,
+    DEFAULT_N_GRID_POINTS,
+    MISSED_MASS_CELLS_ACROSS_DATA,
+    MISSED_MASS_WARNING_NATS,
+)
 from haldensity.core.options import take_deprecated
 from haldensity.core.basis.univariate import create_basis_functions
 from haldensity.core.solvers.cvxpy import (
@@ -29,6 +34,25 @@ from haldensity.core.univariate.support import FullDataHALProblem, certified_sol
 
 
 SOLVER_TOLERANCES = ("tight", "default")
+# start of the missed-mass warning (the tuner silences it inside CV folds; the final fit shows it)
+MISSED_MASS_WARNING = "The fitting objective missed part of the fitted density's mass"
+
+
+def missed_mass_message(gap: float, n_grid_points: int, x: np.ndarray) -> str:
+    """The warning for a fit whose objective's log normalizer is ``gap`` nats below the accurate one."""
+    x = np.asarray(x, dtype=float)
+    x = x[np.isfinite(x)]
+    span = float(x.max() - x.min()) if x.size > 1 else 0.0
+    suggested = 2 * int(n_grid_points)
+    if span > 0:
+        suggested = max(suggested, int(np.ceil(MISSED_MASS_CELLS_ACROSS_DATA / span / 100.0)) * 100)
+    return (
+        f"{MISSED_MASS_WARNING}: its log normalizer is {gap:.3g} nats below the accurate one, so it saw "
+        f"{100 * np.exp(-gap):.1f}% of the mass (warning above {MISSED_MASS_WARNING_NATS} nats). The data span "
+        f"{span:.3g} of [0, 1], too little for the {int(n_grid_points) - 1} cells of n_grid_points="
+        f"{int(n_grid_points)}; refit with a larger n_grid_points, e.g. n_grid_points={suggested} (about "
+        f"{MISSED_MASS_CELLS_ACROSS_DATA} cells across the data)."
+    )
 
 
 class CVXPYEstimator(BaseEstimator):
@@ -59,13 +83,13 @@ class CVXPYEstimator(BaseEstimator):
         norm_constraint: float = 3.0,
         basis_order: int = DEFAULT_BASIS_ORDER,
         max_knots: Union[int, str, None] = "auto",
+        n_grid_points: int = DEFAULT_N_GRID_POINTS,
         solver_threads: int = DEFAULT_SOLVER_THREADS,
         log_dir: Optional[str] = None,
         log_frequency: int = 10,
         # internal (leading underscore): numerical choices the package makes; for tests, benchmarks and
         # experiment repositories only (docs/dev/DECISIONS.md)
         _tol: float = 1e-4,
-        _n_grid_points: int = 200,
         _solver: str = "MOSEK",
         _use_secondary_solver: bool = True,
         _solver_waterfall: Sequence[str] = ("MOSEK", "CLARABEL", "ECOS", "SCS"),
@@ -85,6 +109,13 @@ class CVXPYEstimator(BaseEstimator):
                 max(1,000, ceil(n^(2/3))) for basis_order = 0, so only samples above 1,000 are
                 affected (haldensity.core.univariate.objective.default_max_knots); None: every
                 unique data value; an integer: that K.
+            n_grid_points: the fitting grid, n_grid_points - 1 equal cells of [0, 1] (default 200).
+                Order 2 and above normalize the objective on this grid's cell midpoints (the old
+                midpoint rule); order 1 adds the knots to it; order 0 (the exact objective) does not use
+                it. If the data occupy a small part [a, b] of [0, 1], raise it to about 200 / (b - a),
+                so that about 200 cells cover the data (e.g. 1,000 or more for the galaxy velocities
+                divided by 3e5, which occupy 8% of [0, 1]). Every fit records the missed-mass
+                diagnostic log_z_gap_ and warns when the objective missed more than 0.01 nats.
             solver_threads: threads per solver call (default 1: MOSEK, CLARABEL and the BLAS/OpenMP
                 pools run single-threaded, so parallel runs on shared servers do not take other
                 people's cores). Raise it when one fit runs alone on a dedicated machine.
@@ -94,15 +125,16 @@ class CVXPYEstimator(BaseEstimator):
         CLARABEL, ECOS and SCS with tight tolerances, the SCS step capped at 600 s); the first solution
         that passes is the point estimate and its basis the delta-method SE basis (certified_, kkt_ and
         solve_attempts_ record the check). If none passes, the best attempt is kept with a warning
-        (basis cleaning failed; no SE is given). The 0.1.0 options tol, n_grid_points, solver,
-        use_secondary_solver and solver_waterfall are still accepted through 0.2.x with a
-        DeprecationWarning (removed in 0.3.0).
+        (basis cleaning failed; no SE is given). The 0.1.0 options tol, solver, use_secondary_solver
+        and solver_waterfall are still accepted through 0.2.x with a DeprecationWarning (removed in
+        0.3.0).
         """
         legacy = take_deprecated("CVXPYEstimator", deprecated, {
-            "tol": "_tol", "n_grid_points": "_n_grid_points", "solver": "_solver",
+            "tol": "_tol", "solver": "_solver",
             "use_secondary_solver": "_use_secondary_solver", "solver_waterfall": "_solver_waterfall"})
         _tol = legacy.get("_tol", _tol)
-        _n_grid_points = legacy.get("_n_grid_points", _n_grid_points)
+        if int(n_grid_points) != n_grid_points or n_grid_points < 2:
+            raise ValueError(f"n_grid_points must be an integer >= 2, got {n_grid_points!r}")
         _solver = legacy.get("_solver", _solver)
         _use_secondary_solver = legacy.get("_use_secondary_solver", _use_secondary_solver)
         _solver_waterfall = legacy.get("_solver_waterfall", _solver_waterfall)
@@ -119,7 +151,7 @@ class CVXPYEstimator(BaseEstimator):
             log_frequency=log_frequency,
         )
         self.norm_constraint = norm_constraint
-        self.n_grid_points = int(_n_grid_points)
+        self.n_grid_points = int(n_grid_points)
         self.solver = _solver
         # internal hook: force the objective's normalizer, "midpoint" or "knot_aware"; None (always for
         # users) lets the package choose by the order, see objective_rule_
@@ -146,7 +178,8 @@ class CVXPYEstimator(BaseEstimator):
         self.solver_option_: Optional[str] = None
         self.solver_used_: Optional[str] = None
         self.problem_status_: Optional[str] = None
-        
+        self.log_z_gap_: Optional[float] = None
+
     def fit(self, data: pd.DataFrame) -> 'CVXPYEstimator':
         """
         Fit the CVXPY density estimator.
@@ -221,6 +254,13 @@ class CVXPYEstimator(BaseEstimator):
         # Store the fitted theta as a dictionary for inspection
         assert len(self.basis_names) == len(self.theta_hat), "Basis names count does not match theta_hat length"
         self.fitted_theta_dict = {name: float(value) for name, value in zip(self.basis_names, self.theta_hat)}
+
+        # missed-mass diagnostic (Yilong, 2026-10-24): the accurate log Z minus the objective's, at the point
+        # estimate; a positive gap is mass the objective did not see (the fitting grid too coarse there)
+        self.log_z_gap_ = float(self.log_normalizer().log_z - self.objective_log_normalizer(self.theta_hat))
+        if self.log_z_gap_ > MISSED_MASS_WARNING_NATS:
+            warnings.warn(missed_mass_message(self.log_z_gap_, self.n_grid_points, self._train_x), UserWarning,
+                          stacklevel=2)
 
         return self
     
@@ -349,6 +389,7 @@ class CVXPYEstimator(BaseEstimator):
             "solver_used": self.solver_used_,
             "solver_option": self.solver_option_,
             "problem_status": self.problem_status_,
+            "log_z_gap": self.log_z_gap_,
             "certified": self.certified_,
             "kkt": self.kkt_,
             "support_refit": self.support_,

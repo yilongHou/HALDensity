@@ -63,6 +63,7 @@ def test_knot_aware_removes_the_k0_spike(data):
     assert flagged == {"midpoint": True, "knot_aware": False}
 
 
+@pytest.mark.filterwarnings("ignore:The fitting objective missed:UserWarning")  # the old midpoint rule, forced
 def test_k1_knot_aware_sees_more_of_the_mass_than_the_midpoint_grid(data):
     gaps = {}
     for name in ("midpoint", "knot_aware"):

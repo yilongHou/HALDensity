@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 import json
 import os
+import re
 from typing import Optional, Tuple, Any, Union
 from datetime import datetime
 from scipy.interpolate import interp1d
@@ -31,7 +32,7 @@ from haldensity.core.defaults import DEFAULT_BASIS_ORDER, TUNER_DEFAULTS
 from haldensity.core.options import take_deprecated
 
 # Import estimators
-from haldensity.full_uni.estimators.cvxpy import CVXPYEstimator
+from haldensity.full_uni.estimators.cvxpy import MISSED_MASS_WARNING, CVXPYEstimator
 from haldensity.full_uni.estimators.fista import FISTAEstimator
 from haldensity.full_uni.estimators.projected_gd import ProjectedGDEstimator
 from haldensity.full_uni.estimators.proximal_gd import ProximalGDEstimator
@@ -97,8 +98,10 @@ class OptunaHyperparameterTuner:
 
         CV folds are scored by the exact held-out log-likelihood and fitted at the solvers' own
         tolerances; the final fit (fit_best_model) is the estimator's tight, checked solve. The
-        0.1.0 option n_grid_points had no effect; it is still accepted through 0.2.x with a
-        DeprecationWarning (removed in 0.3.0).
+        fitting grid is an estimator option: pass estimator_kwargs={"n_grid_points": ...} and every
+        fold and the final fit use it. The 0.1.0 tuner option n_grid_points never reached the
+        estimators; it is still accepted through 0.2.x with a DeprecationWarning (removed in 0.3.0)
+        and is now passed on as estimator_kwargs["n_grid_points"].
         
         Args:
             estimator_name: Name of the estimator to tune
@@ -119,8 +122,9 @@ class OptunaHyperparameterTuner:
                   or a tuple/list (low, high), or a single fixed value
             estimator_kwargs: Optional fixed (not tuned) keyword arguments passed to every
                 estimator the tuner builds, in the CV folds and in fit_best_model(), so both
-                use the same settings, e.g. {"max_knots": None} or {"solver_threads": 4}. Keys must
-                not overlap the tuned parameters; fix those with param_overrides instead.
+                use the same settings, e.g. {"n_grid_points": 1000} for data that occupy a small part
+                of [0, 1], {"max_knots": None} or {"solver_threads": 4}. Keys must not overlap the
+                tuned parameters; fix those with param_overrides instead.
             use_conservative_adjustment: After the CV search, move to the smallest bound
                 (norm_constraint) whose mean CV log-likelihood is at least the threshold below the
                 best (haldensity.core.cv.conservative; bracketing then bisection in log M), as the
@@ -144,7 +148,17 @@ class OptunaHyperparameterTuner:
         
         if metric not in ["sll", "bic"]:
             raise ValueError(f"Metric '{metric}' not supported. Use 'sll' or 'bic'.")
-        take_deprecated("OptunaHyperparameterTuner", deprecated, {"n_grid_points": None})
+        estimator_kwargs = dict(estimator_kwargs or {})
+        if "n_grid_points" in deprecated:
+            # 0.1.0 tuner option that never reached the estimators; one route now: estimator_kwargs
+            if "n_grid_points" in estimator_kwargs:
+                raise ValueError("n_grid_points given twice; pass it only in estimator_kwargs")
+            estimator_kwargs["n_grid_points"] = deprecated.pop("n_grid_points")
+            warnings.warn(
+                "OptunaHyperparameterTuner(n_grid_points=...) will be removed in 0.3.0; pass "
+                "estimator_kwargs={'n_grid_points': ...}. It is now passed to every CV fold and to the "
+                "final fit (in 0.1.0 it had no effect).", DeprecationWarning, stacklevel=2)
+        take_deprecated("OptunaHyperparameterTuner", deprecated, {})
         if _cv_scoring not in CV_SCORINGS:
             raise ValueError(f"_cv_scoring must be one of {CV_SCORINGS}, got {_cv_scoring!r}")
         
@@ -163,7 +177,7 @@ class OptunaHyperparameterTuner:
         # the order is fixed at the package default (k = 2) unless the overrides ask for CV over it,
         # e.g. param_overrides={"basis_order": [0, 1, 2]} (Yilong, 2026-10-24)
         self.param_overrides.setdefault("basis_order", DEFAULT_BASIS_ORDER)
-        self.estimator_kwargs: dict[str, Any] = dict(estimator_kwargs or {})
+        self.estimator_kwargs: dict[str, Any] = estimator_kwargs
         self.cv_scoring = _cv_scoring
         if _cv_solver_tolerance not in ("tight", "default"):
             raise ValueError(f"_cv_solver_tolerance must be 'tight' or 'default', got {_cv_solver_tolerance!r}")
@@ -501,14 +515,16 @@ class OptunaHyperparameterTuner:
                 train_data = self.data.iloc[train_idx].reset_index(drop=True)
                 val_data = self.data.iloc[val_idx].reset_index(drop=True)
                 
-                # Create and fit estimator. CVXPY's "Solution may be inaccurate" notice is noise in
-                # the search (the status is recorded on the estimator); the final fit still shows it.
+                # Create and fit estimator. CVXPY's "Solution may be inaccurate" notice and the
+                # missed-mass warning are noise in the search (both are recorded on the estimator);
+                # the final fit still shows them.
                 fold_params = params
                 if self.estimator_name == "CVXPYEstimator":
                     fold_params = {**params, "_solver_tolerance": self.cv_solver_tolerance}
                 estimator = self.estimator_class(**fold_params)
                 with warnings.catch_warnings():
                     warnings.filterwarnings("ignore", message="Solution may be inaccurate", category=UserWarning)
+                    warnings.filterwarnings("ignore", message=re.escape(MISSED_MASS_WARNING), category=UserWarning)
                     estimator.fit(train_data)
                 self._last_objective_rule = getattr(estimator, "objective_rule_", None)
                 
