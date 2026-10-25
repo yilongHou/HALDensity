@@ -54,3 +54,26 @@ def test_delta_method_confidence_interval_runs_end_to_end():
     assert np.all(np.isfinite(ci[["density", "se", "lower", "upper"]].to_numpy()))
     assert np.all(ci["se"] >= 0)
     assert np.all((ci["lower"] <= ci["density"]) & (ci["density"] <= ci["upper"]))
+
+
+def test_relative_cutoff_and_model_information_are_internal_candidates():
+    # candidates under study (Yilong, 2026-10-24); the default stays the empirical information + ridge 1e-6
+    data, estimator = _fit(1)
+    results = estimator.get_results()
+    x = np.linspace(0.05, 0.6, 5)
+    default = estimate_covariance_beta(data, results, basis_order=1)
+    np.testing.assert_array_equal(default, estimate_covariance_beta(data, results, basis_order=1, _inverse="ridge",
+                                                                    _ridge_param=1e-6, _information="empirical"))
+    for options in ({"_inverse": "cutoff"}, {"_inverse": "cutoff", "_information": "model"},
+                    {"_information": "model"}):
+        cov = estimate_covariance_beta(data, results, basis_order=1, **options)
+        assert np.allclose(cov, cov.T) and np.linalg.eigvalsh(cov).min() > -1e-12 * np.abs(cov).max()
+        se = density_confidence_interval(x, results, cov, basis_order=1)["se"].to_numpy()
+        assert np.all(np.isfinite(se) & (se > 0))
+    # the centred intercept is zero, so the cutoff drops its direction: no variance there
+    cut = estimate_covariance_beta(data, results, basis_order=1, _inverse="cutoff")
+    assert np.abs(cut[0]).max() < 1e-8 * np.abs(cut).max()
+    with pytest.raises(ValueError, match="_inverse"):
+        estimate_covariance_beta(data, results, basis_order=1, _inverse="pinv")
+    with pytest.raises(ValueError, match="_information"):
+        estimate_covariance_beta(data, results, basis_order=1, _information="observed")

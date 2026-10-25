@@ -112,6 +112,41 @@ def _theta_for_se(estimation_results: dict, support_refit: Optional[SupportRefit
     return np.asarray(support_refit.theta, dtype=float)
 
 
+INVERSES = ("ridge", "cutoff")
+INFORMATIONS = ("empirical", "model")
+
+
+def _covariance_from_information(information: np.ndarray, root: Optional[np.ndarray], n_samples: int,
+                                 inverse: str, ridge_param: float, relative_cutoff: float) -> np.ndarray:
+    """Cov(beta-hat) = information^{-1} / n.
+
+    "ridge": the inverse of information + ridge_param * I (an absolute ridge, the package default).
+    "cutoff": the pseudo-inverse from the singular values of ``root`` (information = root' root), dropping
+    the directions whose eigenvalue is below ``relative_cutoff`` times the largest (the intercept's
+    direction is exactly zero), so no constant depends on the scale of the basis functions.
+    """
+    if inverse == "ridge":
+        regularized_information = information + ridge_param * np.eye(information.shape[0])
+        try:
+            return np.linalg.inv(regularized_information) / n_samples
+        except np.linalg.LinAlgError:
+            warnings.warn("Information matrix is singular. Using pseudo-inverse.")
+            return np.linalg.pinv(regularized_information) / n_samples
+    _, singular_values, vt = np.linalg.svd(root, full_matrices=False)
+    eigenvalues = singular_values ** 2
+    keep = eigenvalues > relative_cutoff * eigenvalues.max(initial=0.0)
+    directions = vt[keep].T
+    return (directions / eigenvalues[keep]) @ directions.T / n_samples
+
+
+def _model_information_root(theta_hat_full: np.ndarray, knots: np.ndarray, basis_order: int) -> np.ndarray:
+    """R with R' R = Cov(phi) under the fitted density (the model-based information), on the selected basis."""
+    points, weights, result = quadrature_rule(theta_hat_full, knots, basis_order)
+    mass = weights * np.exp(log_unnormalized_density(points, theta_hat_full, knots, basis_order) - result.log_z)
+    phi = _basis(points, _selected_knots(theta_hat_full, knots, basis_order), basis_order)
+    return np.sqrt(mass)[:, np.newaxis] * (phi - mass @ phi)
+
+
 def estimate_covariance_beta(
     data: pd.DataFrame,
     estimation_results: dict,
@@ -119,6 +154,9 @@ def estimate_covariance_beta(
     *,
     support_refit: SupportRefitArg = "auto",
     _ridge_param: float = 1e-6,
+    _inverse: str = "ridge",
+    _relative_cutoff: float = 1e-10,
+    _information: str = "empirical",
     **deprecated,
 ) -> np.ndarray:
     """Estimate Cov(β̂) via observed Fisher information with ridge regularization.
@@ -126,10 +164,20 @@ def estimate_covariance_beta(
     ``support_refit="auto"`` (default) uses the cleaned basis when the results carry the fit's
     L1 bound; ``None`` uses the original basis; a :class:`SupportRefit` is used as given. If basis
     cleaning failed, no SE is given: the covariance is NaN, with a warning.
+
+    Internal (a candidate under study, Yilong 2026-10-24; the default is unchanged): ``_inverse="cutoff"``
+    inverts the information through its singular values with a relative cutoff ``_relative_cutoff`` instead
+    of adding the absolute ridge ``_ridge_param``; ``_information="model"`` uses the covariance of the
+    basis under the fitted density instead of the empirical information P_n S S' (a reference only; the
+    paper recommends the empirical one).
     """
     # ridge_param (0.1.0) is internal since 0.2.0; accepted through 0.2.x with a DeprecationWarning
     ridge_param = take_deprecated("estimate_covariance_beta", deprecated, {"ridge_param": "_ridge_param"}).get(
         "_ridge_param", _ridge_param)
+    if _inverse not in INVERSES:
+        raise ValueError(f"_inverse must be one of {INVERSES}, got {_inverse!r}")
+    if _information not in INFORMATIONS:
+        raise ValueError(f"_information must be one of {INFORMATIONS}, got {_information!r}")
     if isinstance(support_refit, str):
         if support_refit != "auto":
             raise ValueError("support_refit must be 'auto', None or a SupportRefit")
@@ -150,16 +198,14 @@ def estimate_covariance_beta(
     basis_matrix_selected = _basis(data, selected_knots, basis_order)
 
     scores = basis_matrix_selected - expected_phi[np.newaxis, :]
-    observed_information = (scores.T @ scores) / n_samples
-
-    ridge_matrix = ridge_param * np.eye(observed_information.shape[0])
-    regularized_information = observed_information + ridge_matrix
-
-    try:
-        covariance_matrix = np.linalg.inv(regularized_information) / n_samples
-    except np.linalg.LinAlgError:
-        warnings.warn("Information matrix is singular. Using pseudo-inverse.")
-        covariance_matrix = np.linalg.pinv(regularized_information) / n_samples
+    if _information == "model":
+        root = _model_information_root(theta_hat_full, knots, basis_order)
+        information = root.T @ root
+    else:
+        root = scores / np.sqrt(n_samples)
+        information = (scores.T @ scores) / n_samples
+    covariance_matrix = _covariance_from_information(information, root, n_samples, _inverse, ridge_param,
+                                                     _relative_cutoff)
 
     covariance = covariance_matrix.view(BasisCovariance)
     covariance.support_refit = support_refit
