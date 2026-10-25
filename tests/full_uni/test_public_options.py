@@ -49,7 +49,8 @@ def test_tuner_and_variance_options_of_0_1_0_warn_and_still_work():
     results = fit.get_results()
     with pytest.warns(DeprecationWarning, match="_ridge_param="):
         old = estimate_covariance_beta(data, results, 1, ridge_param=1e-4)
-    np.testing.assert_array_equal(old, estimate_covariance_beta(data, results, 1, _ridge_param=1e-4))
+    # the 0.1.0 option keeps the 0.1.0 rule, an absolute ridge (the default is the scaled floor since 0.2.0)
+    np.testing.assert_array_equal(old, estimate_covariance_beta(data, results, 1, _inverse="ridge", _ridge_param=1e-4))
 
 
 def test_options_new_in_0_2_0_are_internal_only():

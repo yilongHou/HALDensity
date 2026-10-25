@@ -56,14 +56,39 @@ def test_delta_method_confidence_interval_runs_end_to_end():
     assert np.all((ci["lower"] <= ci["density"]) & (ci["density"] <= ci["upper"]))
 
 
+def test_the_default_se_rule_is_the_scaled_floor_at_1e_5():
+    # Yilong, 2026-10-24, after SE round 2: the scaled floor r0 = 1e-5 on the empirical information is the default;
+    # the absolute ridge 1e-6 (the 0.1.0 default) stays available internally as the reference
+    import inspect
+
+    from haldensity.core.variance import REFERENCE_RIDGE, SCALED_FLOOR
+
+    parameters = inspect.signature(estimate_covariance_beta).parameters
+    assert parameters["_inverse"].default == "scaled_floor" and parameters["_floor"].default == SCALED_FLOOR == 1e-5
+    assert parameters["_information"].default == "empirical"
+    assert parameters["_ridge_param"].default == REFERENCE_RIDGE == 1e-6
+    x = np.linspace(0.05, 0.6, 5)
+    for k in (0, 2):
+        data, estimator = _fit(k)
+        results = estimator.get_results()
+        default = estimate_covariance_beta(data, results, basis_order=k)
+        np.testing.assert_array_equal(default, estimate_covariance_beta(data, results, basis_order=k,
+                                                                        _inverse="scaled_floor", _floor=1e-5))
+        ridge = estimate_covariance_beta(data, results, basis_order=k, _inverse="ridge", _ridge_param=1e-6)
+        with pytest.warns(DeprecationWarning, match="absolute ridge"):
+            old_option = estimate_covariance_beta(data, results, basis_order=k, ridge_param=1e-6)
+        np.testing.assert_array_equal(old_option, ridge)  # the 0.1.0 option keeps the 0.1.0 rule
+        if k == 0:  # indicators: both constants are negligible against the information
+            se_default = density_confidence_interval(x, results, default, basis_order=k)["se"]
+            se_ridge = density_confidence_interval(x, results, ridge, basis_order=k)["se"]
+            np.testing.assert_allclose(se_default, se_ridge, rtol=1e-3)
+
+
 def test_relative_cutoff_and_model_information_are_internal_candidates():
-    # candidates under study (Yilong, 2026-10-24); the default stays the empirical information + ridge 1e-6
+    # candidates studied in rounds 1 and 2 (Yilong, 2026-10-24), not adopted
     data, estimator = _fit(1)
     results = estimator.get_results()
     x = np.linspace(0.05, 0.6, 5)
-    default = estimate_covariance_beta(data, results, basis_order=1)
-    np.testing.assert_array_equal(default, estimate_covariance_beta(data, results, basis_order=1, _inverse="ridge",
-                                                                    _ridge_param=1e-6, _information="empirical"))
     for options in ({"_inverse": "cutoff"}, {"_inverse": "cutoff", "_information": "model"},
                     {"_information": "model"}):
         cov = estimate_covariance_beta(data, results, basis_order=1, **options)
@@ -104,17 +129,17 @@ def test_the_scaled_floor_does_not_depend_on_units(k, s):
         cov = estimate_covariance_beta(d, res, basis_order=k, support_refit=None, _support=support, **options)
         return density_confidence_interval(points, res, cov, basis_order=k, support_refit=None, _support=support)
 
-    for options in ({"_inverse": "scaled_floor", "_floor": 1e-6}, {"_inverse": "scaled_floor", "_floor": 1e-3},
-                    {"_inverse": "scaled_floor", "_floor": 1e-6, "_information": "model"}):
+    for options in ({}, {"_inverse": "scaled_floor", "_floor": 1e-6}, {"_inverse": "scaled_floor", "_floor": 1e-3},
+                    {"_inverse": "scaled_floor", "_floor": 1e-6, "_information": "model"}):   # {}: the default
         original = se(results, data, x, (0.0, 1.0), **options)
         rescaled = se(squeezed, squeezed_data, s * x, (0.0, s), **options)
         np.testing.assert_allclose(rescaled["density"] * s, original["density"], rtol=1e-9)
         np.testing.assert_allclose(rescaled["se"] * s, original["se"], rtol=1e-8)
-    if k >= 1:                                            # the absolute ridge depends on the units
-        original = se(results, data, x, (0.0, 1.0), _ridge_param=1e-6)
-        rescaled = se(squeezed, squeezed_data, s * x, (0.0, s), _ridge_param=1e-6)
+    if k >= 1:                                            # the absolute ridge (0.1.0) depends on the units
+        original = se(results, data, x, (0.0, 1.0), _inverse="ridge", _ridge_param=1e-6)
+        rescaled = se(squeezed, squeezed_data, s * x, (0.0, s), _inverse="ridge", _ridge_param=1e-6)
         assert np.max(np.abs(rescaled["se"] * s / original["se"] - 1)) > 1e-3
-    cov = estimate_covariance_beta(data, results, basis_order=k, support_refit=None, _inverse="scaled_floor")
+    cov = estimate_covariance_beta(data, results, basis_order=k, support_refit=None)
     assert np.all(cov[0] == 0)                            # the intercept's centred score is zero: dropped
 
 

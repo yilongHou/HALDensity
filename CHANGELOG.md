@@ -96,7 +96,8 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   variance functions: `support_refit` and `alpha`. Options that were public in 0.1.0 still work through
   0.2.x with a `DeprecationWarning` naming the internal replacement and are removed in 0.3.0:
   `CVXPYEstimator(tol, solver, use_secondary_solver, solver_waterfall)` -> `_tol`, `_solver`,
-  `_use_secondary_solver`, `_solver_waterfall`; `estimate_covariance_beta(ridge_param)` -> `_ridge_param`.
+  `_use_secondary_solver`, `_solver_waterfall`; `estimate_covariance_beta(ridge_param)` -> `_ridge_param`
+  (passing `ridge_param` keeps the 0.1.0 rule, the absolute ridge, with `_inverse="ridge"`).
   Options added during the restructure are internal directly:
   `_normalizer`, `_solver_tolerance`, `_objective_normalizer` (estimator), `_cv_scoring`,
   `_cv_solver_tolerance` and the conservative search's `_conservative_bracket_factor`,
@@ -260,6 +261,20 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   fits (MOSEK): on Galaxies (k = 2, M = 596,793) the centre rises by 5.4% and the SE by 4-12% (ridge 1e-6)
   or 4-15% (ridge 1e-10); for the k = 0 fit (n = 400) both rise by 1.2%; for the k = 1 and 2 fits of simulated
   data the centre moves by less than 6e-5 and the SE by less than 8e-4 relative. Fits are unchanged.
+- **The delta-method SE inverts the information with the scaled floor** (Yilong, 2026-10-24, after SE round
+  2; core): `estimate_covariance_beta` adds a ridge of 1e-5 times each column's own score variance (the
+  information scaled to unit diagonal, plus 1e-5 I, scaled back) instead of the absolute ridge 1e-6. The rule
+  has no units, so the SE no longer changes when the data's units do; the intercept and any column constant on
+  the data are dropped. Evidence (round 2, 180 cells, rules fixed in advance): on the original data the floor
+  matches the ridge's coverage (mean |coverage - 95%|, floor minus ridge, -0.026, bootstrap SE 0.0015); on
+  copies of the same data with squeezed units the ridge loses more than 3 coverage points in 98 of 180 cells,
+  while the floor's SE is unchanged to 1e-9. **SEs and intervals change**: before/after on 12 fixed fits (the
+  same cleaned fit, M chosen by CV; SE new / old, median over the data's 5-95% quantiles): k = 0 1.000 on all
+  four data sets; on three simulated samples that fill [0, 1] (n = 400) 1.01-1.13 at k = 1 and 1.18-1.19 at
+  k = 2 (1.68 for a fit with 349 knots); on Galaxies (8% of [0, 1]) 1.64 at k = 1 and 4.38 at k = 2, where
+  the old ridge was too narrow (band width over the data range 0.43 times a bootstrap's at fixed M; the floor's
+  is 1.61 times). The absolute ridge stays available internally (`_inverse="ridge"`, `_ridge_param`) as the
+  reference the paper's experiments compute alongside.
 - **Full-data targeting integrates exactly** (Yilong, 2026-10-24; full data, univariate): the M-step's
   normalizer, the plug-in and TMLE functionals and the median's EIC variance were sums over a 5e-4 grid, so the
   score equations held at the nearest grid cell, not at the targeting point (on Galaxies the targeted survival

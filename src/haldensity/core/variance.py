@@ -13,6 +13,11 @@ The band's centre (the density), its normalizing constant and E[phi] in the scor
 accurate normalizer (Gauss-Legendre with breakpoints at the selected knots, exact for k = 0;
 :func:`haldensity.core.univariate.normalizer.quadrature_rule`), so the centre is the density that
 ``get_density_at_points`` reports. Before 0.2.0 they used a 200-point trapezoid on [0, 1].
+
+The information is inverted with the scaled floor (the default since 0.2.0; Yilong, 2026-10-24, after SE
+round 2): a ridge of 1e-5 times each column's own score variance, which has no units, so the SE does not
+change when the data's units do. The 0.1.0 rule, an absolute ridge 1e-6 that depends on the units, stays
+available internally (``_inverse="ridge"``) as the reference the paper's experiments compute alongside.
 """
 
 from collections import OrderedDict
@@ -24,7 +29,7 @@ from scipy.stats import norm
 import warnings
 
 from haldensity.core.basis.univariate import create_basis_functions
-from haldensity.core.options import take_deprecated
+from haldensity.core.options import REMOVED_IN, take_deprecated
 from haldensity.core.univariate.normalizer import SUPPORT, log_unnormalized_density, quadrature_rule
 from haldensity.core.univariate.support import SupportRefit, refit_support
 
@@ -112,7 +117,11 @@ def _theta_for_se(estimation_results: dict, support_refit: Optional[SupportRefit
     return np.asarray(support_refit.theta, dtype=float)
 
 
-INVERSES = ("ridge", "cutoff", "scaled_floor")
+INVERSES = ("scaled_floor", "ridge", "cutoff")
+# the default rule's constant: a ridge of SCALED_FLOOR times each column's own score variance
+SCALED_FLOOR = 1e-5
+# the 0.1.0 default, an absolute ridge on the information; kept internally as a reference
+REFERENCE_RIDGE = 1e-6
 # a column whose centred score has an RMS below this fraction of the column's own RMS is constant (the
 # intercept; relative to the column itself, so the test does not depend on the data's units)
 CONSTANT_COLUMN_TOL = 1e-12
@@ -122,18 +131,18 @@ INTERVAL_SCALES = ("density", "log")
 
 def _covariance_from_information(information: np.ndarray, root: Optional[np.ndarray], n_samples: int,
                                  inverse: str, ridge_param: float, relative_cutoff: float,
-                                 floor: float = 1e-6, constant: Optional[np.ndarray] = None) -> np.ndarray:
+                                 floor: float = SCALED_FLOOR, constant: Optional[np.ndarray] = None) -> np.ndarray:
     """Cov(beta-hat) = information^{-1} / n.
 
-    "ridge": the inverse of information + ridge_param * I (an absolute ridge, the package default).
+    "scaled_floor" (the package default): the information scaled to unit diagonal, R = D^-1 I D^-1 with d_j
+    the RMS of the centred score of column j, and Cov = D^-1 (R + floor * I)^-1 D^-1 / n, i.e. a ridge of
+    floor * d_j^2 on coordinate j: no units, so the SE does not change when the data's units do. The
+    ``constant`` columns (the intercept, whose centred score is zero, and any other column constant on the
+    data; :func:`_constant_columns`) are dropped: their rows and columns of Cov are zero.
+    "ridge": the inverse of information + ridge_param * I (an absolute ridge, the 0.1.0 default).
     "cutoff": the pseudo-inverse from the singular values of ``root`` (information = root' root), dropping
     the directions whose eigenvalue is below ``relative_cutoff`` times the largest (the intercept's
     direction is exactly zero), so no constant depends on the scale of the basis functions.
-    "scaled_floor": the information scaled to unit diagonal, R = D^-1 I D^-1 with d_j the RMS of the centred
-    score of column j, and Cov = D^-1 (R + floor * I)^-1 D^-1 / n, i.e. a ridge of floor * d_j^2 on coordinate
-    j: no units, so the SE does not change when the data's units do. The ``constant`` columns (the intercept,
-    whose centred score is zero, and any other column constant on the data; :func:`_constant_columns`) are
-    dropped: their rows and columns of Cov are zero.
     """
     if inverse == "scaled_floor":
         scale = np.sqrt(np.clip(np.diag(information), 0.0, None))
@@ -183,31 +192,41 @@ def estimate_covariance_beta(
     basis_order: int,
     *,
     support_refit: SupportRefitArg = "auto",
-    _ridge_param: float = 1e-6,
-    _inverse: str = "ridge",
+    _inverse: str = "scaled_floor",
+    _floor: float = SCALED_FLOOR,
+    _ridge_param: float = REFERENCE_RIDGE,
     _relative_cutoff: float = 1e-10,
     _information: str = "empirical",
-    _floor: float = 1e-6,
     _support: tuple[float, float] = SUPPORT,
     **deprecated,
 ) -> np.ndarray:
-    """Estimate Cov(β̂) via observed Fisher information with ridge regularization.
+    """Estimate Cov(β̂) by the delta method: the empirical information P_n S S', inverted with the scaled floor.
 
-    ``support_refit="auto"`` (default) uses the cleaned basis when the results carry the fit's
-    L1 bound; ``None`` uses the original basis; a :class:`SupportRefit` is used as given. If basis
-    cleaning failed, no SE is given: the covariance is NaN, with a warning.
+    The scaled floor (default since 0.2.0; Yilong, 2026-10-24, after SE round 2) adds a ridge of 1e-5 times
+    each column's own score variance (``_floor``), so the SE does not depend on the data's units; the
+    intercept and any column constant on the data are dropped. ``support_refit="auto"`` (default) uses the
+    cleaned basis when the results carry the fit's L1 bound; ``None`` uses the original basis; a
+    :class:`SupportRefit` is used as given. If basis cleaning failed, no SE is given: the covariance is NaN,
+    with a warning.
 
-    Internal (a candidate under study, Yilong 2026-10-24; the default is unchanged): ``_inverse="cutoff"``
-    inverts the information through its singular values with a relative cutoff ``_relative_cutoff`` instead
-    of adding the absolute ridge ``_ridge_param``; ``_information="model"`` uses the covariance of the
-    basis under the fitted density instead of the empirical information P_n S S' (a reference only; the
-    paper recommends the empirical one); ``_inverse="scaled_floor"`` adds ``_floor`` times each column's own
-    score variance (the scaled floor, round 2). ``_support`` (default [0, 1]) is the interval the fitted
-    density lives on, for tests that rescale the data's units.
+    Internal: ``_inverse="ridge"`` is the 0.1.0 rule, the information plus the absolute ridge
+    ``_ridge_param`` (1e-6), kept as the reference the paper's experiments compute alongside; the 0.1.0
+    option ``ridge_param`` still selects it (deprecated). ``_inverse="cutoff"`` inverts the information
+    through its singular values with a relative cutoff ``_relative_cutoff`` (round 1; not adopted);
+    ``_information="model"`` uses the covariance of the basis under the fitted density instead of the
+    empirical information (a reference only; the paper recommends the empirical one). ``_support`` (default
+    [0, 1]) is the interval the fitted density lives on, for tests that rescale the data's units.
     """
-    # ridge_param (0.1.0) is internal since 0.2.0; accepted through 0.2.x with a DeprecationWarning
-    ridge_param = take_deprecated("estimate_covariance_beta", deprecated, {"ridge_param": "_ridge_param"}).get(
-        "_ridge_param", _ridge_param)
+    if "ridge_param" in deprecated:
+        # 0.1.0 option: it keeps the 0.1.0 rule, an absolute ridge; accepted through 0.2.x
+        warnings.warn(
+            f"estimate_covariance_beta(ridge_param=...) is deprecated and will be removed in {REMOVED_IN}. It selects "
+            "the 0.1.0 rule, an absolute ridge on the information (internally _inverse='ridge', _ridge_param=...); "
+            "the default since 0.2.0 is the scaled floor, which does not depend on the data's units.",
+            DeprecationWarning, stacklevel=2)
+        _inverse, _ridge_param = "ridge", float(deprecated.pop("ridge_param"))
+    take_deprecated("estimate_covariance_beta", deprecated, {})  # anything else is an unknown argument
+    ridge_param = _ridge_param
     if _inverse not in INVERSES:
         raise ValueError(f"_inverse must be one of {INVERSES}, got {_inverse!r}")
     if _information not in INFORMATIONS:
