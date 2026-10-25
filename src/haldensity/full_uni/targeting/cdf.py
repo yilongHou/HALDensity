@@ -3,6 +3,7 @@ import pandas as pd
 from typing import Union, Any, Tuple
 from haldensity.core.defaults import DEFAULT_BASIS_ORDER
 from haldensity.full_uni.targeting.base import BaseTargetLearner
+from haldensity.full_uni.targeting.exact import ExactDensity
 from haldensity.full_uni.targeting.cdf_basis import create_targeting_basis_functions
 from haldensity.core.basis.univariate import create_basis_functions
 from haldensity.core.univariate.functionals import generic_compute_cdf_from_density
@@ -51,7 +52,15 @@ class CDFTargetLearner(BaseTargetLearner):
     This learner creates targeting basis functions based on cumulative indicators
     using less-than-or-equal comparisons with grid points.
     """
-    
+
+    def targeting_breakpoints(self, **kwargs) -> np.ndarray:
+        """The indicators I(x <= t) jump at the targeting points: they are cell edges of the M-step's rule."""
+        return np.asarray(kwargs['targeting_points'], dtype=float)
+
+    def target_values(self, density: ExactDensity, **kwargs) -> tuple[np.ndarray, None]:
+        """F(t) = P(X <= t) at the targeting points, exactly."""
+        return density.cdf(np.asarray(kwargs['targeting_points'], dtype=float)), None
+
     def get_b_ik_targeting(self, uncensored_data: pd.DataFrame, **kwargs) -> np.ndarray:
         """
         Create targeting basis design matrix for uncensored data based on CDF indicators.
@@ -157,12 +166,13 @@ class CDFTargetLearner(BaseTargetLearner):
             Estimated variances for each targeting point, shape (n_targeting_points,).
         """
         targeting_points = kwargs['targeting_points']
-        
-        # Step 1: Compute CDF from the targeted density
-        cdf, grid_cdf = _compute_cdf_from_density(targeted_fit)
-        
-        # Step 2: Interpolate CDF probabilities at targeting points
-        cdf_targeting = np.interp(targeting_points, grid_cdf, cdf, left=0.0, right=1.0)
+
+        # Steps 1-2: the targeted CDF at the targeting points, exact (the M-step's estimate); the sample
+        # variance below does not depend on it, but the EIC values do
+        cdf_targeting = self._exact_estimate(targeted_fit)
+        if cdf_targeting is None:
+            cdf, grid_cdf = _compute_cdf_from_density(targeted_fit)
+            cdf_targeting = np.interp(targeting_points, grid_cdf, cdf, left=0.0, right=1.0)
         
         # Step 3: Build the targeting basis for the data (I(x < t) terms)
         # Note: We use order=0 to get step function indicators as in research code

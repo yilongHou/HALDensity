@@ -3,11 +3,10 @@ import pandas as pd
 from typing import Union, Any, Tuple
 from haldensity.core.defaults import DEFAULT_BASIS_ORDER
 from haldensity.full_uni.targeting.base import BaseTargetLearner
-from haldensity.core.univariate.base_estimator import BaseEstimator
+from haldensity.full_uni.targeting.exact import ExactDensity, cell_edges, converged_rule
+from haldensity.core.univariate.normalizer import log_unnormalized_density
 from haldensity.core.univariate.functionals import generic_compute_median_from_density
 
-N_POINTS = 2001
-DENSITY_EVAL_GRID = np.linspace(0, 1, N_POINTS)
 
 
 def _compute_median_from_density(targeted_fit: dict[str, Any]) -> Tuple[float, float]:
@@ -44,125 +43,48 @@ class MedianTargetLearner(BaseTargetLearner):
     Target learner that uses median-based targeting basis functions.
     
     This learner creates targeting basis functions that are indicators for 
-    whether data points are less than the estimated median.
+    whether data points are less than the initial fit's median m. The M-step's
+    integration rule has a cell edge at m, so the targeted density satisfies
+    F(m) = P_n(X < m) at m itself.
     """
+
+    def _initial_median(self, **kwargs) -> float:
+        """The initial fit's median, exactly (cached per fit)."""
+        old_theta = np.asarray(kwargs['_old_theta'], dtype=float).ravel()
+        knots = np.asarray(kwargs['_grid_points_hal_selected'], dtype=float).ravel()
+        key = (old_theta.tobytes(), knots.tobytes(), int(self.basis_order))
+        cached = getattr(self, "_median_cache", None)
+        if cached is None or cached[0] != key:
+            def fixed(x: np.ndarray) -> np.ndarray:
+                return log_unnormalized_density(x, old_theta, knots, self.basis_order)
+            median = ExactDensity(fixed, converged_rule(fixed, cell_edges(knots))).quantile(0.5)
+            self._median_cache = cached = (key, median)
+        return cached[1]
+
+    def _indicator(self, x: np.ndarray, **kwargs) -> np.ndarray:
+        """I(x < m), m the initial fit's median; shape (n, 1)."""
+        return (np.asarray(x, dtype=float) < self._initial_median(**kwargs)).astype(float)[:, None]
+
+    def targeting_breakpoints(self, **kwargs) -> np.ndarray:
+        return np.array([self._initial_median(**kwargs)])
+
+    def target_values(self, density: ExactDensity, **kwargs) -> tuple[np.ndarray, np.ndarray]:
+        """The median of ``density`` and the density there, exactly."""
+        median = density.quantile(0.5)
+        return np.array([median]), density.density(np.array([median]))
     
     def get_b_ik_targeting(self, uncensored_data: pd.DataFrame, **kwargs) -> np.ndarray:
-        """
-        Create targeting basis design matrix for uncensored data based on median.
-        
-        Parameters
-        ----------
-        uncensored_data : pd.DataFrame
-            The uncensored data points.
-        **kwargs
-            Should contain 'old_theta' and 'grid_points_hal_selected' for median calculation.
-            
-        Returns
-        -------
-        np.ndarray
-            Targeting basis matrix (n_data, 1) with indicators for values < median.
-        """
-        # Extract required parameters
-        old_theta = kwargs['_old_theta']
-        grid_points_hal_selected = kwargs['_grid_points_hal_selected']
-        
-        # Calculate density and median
-        density = BaseEstimator.calculate_density_at_points(
-            points=DENSITY_EVAL_GRID,
-            theta_hat=old_theta,
-            basis_grid_points=grid_points_hal_selected,
-            basis_order=self.basis_order
-        )
-        
-        # Calculate CDF and find median
-        cdf = np.cumsum(density * np.diff(DENSITY_EVAL_GRID, prepend=DENSITY_EVAL_GRID[0])) 
-        median_from_data_density = DENSITY_EVAL_GRID[np.searchsorted(cdf / cdf[-1], 0.5)]
-        
-        # Create indicator for values less than median
-        b_ik_targeting = uncensored_data['W1'].values < median_from_data_density
-        if b_ik_targeting.ndim == 1:
-            b_ik_targeting = b_ik_targeting[:, None]
-        
-        return b_ik_targeting
+        """Targeting basis at the data, (n_data, 1): I(x < m). kwargs carry '_old_theta' and
+        '_grid_points_hal_selected' (the initial fit)."""
+        return self._indicator(uncensored_data['W1'].values, **kwargs)
     
     def get_b_jk_targeting(self, data_grid: pd.DataFrame, **kwargs) -> np.ndarray:
-        """
-        Create targeting basis design matrix for integration grid based on median.
-        
-        Parameters
-        ----------
-        data_grid : pd.DataFrame
-            The integration grid points.
-        **kwargs
-            Should contain 'old_theta' and 'grid_points_hal_selected' for median calculation.
-            
-        Returns
-        -------
-        np.ndarray
-            Targeting basis matrix (n_grid, 1) with indicators for values < median.
-        """
-        # Extract required parameters
-        old_theta = kwargs['_old_theta']
-        grid_points_hal_selected = kwargs['_grid_points_hal_selected']
-        
-        # Calculate density and median (same as in get_b_ik_targeting)
-        density = BaseEstimator.calculate_density_at_points(
-            points=DENSITY_EVAL_GRID,
-            theta_hat=old_theta,
-            basis_grid_points=grid_points_hal_selected,
-            basis_order=self.basis_order
-        )
-        
-        # Calculate CDF and find median
-        cdf = np.cumsum(density * np.diff(DENSITY_EVAL_GRID, prepend=DENSITY_EVAL_GRID[0])) 
-        median_from_data_density = DENSITY_EVAL_GRID[np.searchsorted(cdf / cdf[-1], 0.5)]
-        
-        # Create indicator for values less than median
-        b_jk_targeting = data_grid['W1'].values < median_from_data_density
-        if b_jk_targeting.ndim == 1:
-            b_jk_targeting = b_jk_targeting[:, None]
-        
-        return b_jk_targeting
+        """Targeting basis at integration points, (n_points, 1): I(x < m)."""
+        return self._indicator(data_grid['W1'].values, **kwargs)
     
     def get_b_jk_targeting_full(self, data_grid_full: pd.DataFrame, **kwargs) -> np.ndarray:
-        """
-        Create targeting basis design matrix for fine evaluation grid based on median.
-        
-        Parameters
-        ----------
-        data_grid_full : pd.DataFrame
-            The fine evaluation grid points.
-        **kwargs
-            Should contain 'old_theta' and 'grid_points_hal_selected' for median calculation.
-            
-        Returns
-        -------
-        np.ndarray
-            Targeting basis matrix (n_grid_full, 1) with indicators for values < median.
-        """
-        # Extract required parameters
-        old_theta = kwargs['_old_theta']
-        grid_points_hal_selected = kwargs['_grid_points_hal_selected']
-        
-        # Calculate density and median (same as in get_b_ik_targeting)
-        density = BaseEstimator.calculate_density_at_points(
-            points=DENSITY_EVAL_GRID,
-            theta_hat=old_theta,
-            basis_grid_points=grid_points_hal_selected,
-            basis_order=self.basis_order
-        )
-        
-        # Calculate CDF and find median
-        cdf = np.cumsum(density * np.diff(DENSITY_EVAL_GRID, prepend=DENSITY_EVAL_GRID[0])) 
-        median_from_data_density = DENSITY_EVAL_GRID[np.searchsorted(cdf / cdf[-1], 0.5)]
-        
-        # Create indicator for values less than median
-        b_jk_targeting_full = data_grid_full['W1'].values < median_from_data_density
-        if b_jk_targeting_full.ndim == 1:
-            b_jk_targeting_full = b_jk_targeting_full[:, None]
-        
-        return b_jk_targeting_full
+        """Targeting basis at the fine evaluation grid, (n_grid_full, 1): I(x < m)."""
+        return self._indicator(data_grid_full['W1'].values, **kwargs)
     
     def get_estimand_variance(
         self,
@@ -193,8 +115,13 @@ class MedianTargetLearner(BaseTargetLearner):
         np.ndarray
             Estimated variance for the median (single element array).
         """
-        # Step 1: Compute median and density at median from the targeted density
-        median_value, density_at_median = _compute_median_from_density(targeted_fit)
+        # Step 1: the targeted median and the density there, exact (the M-step's estimate)
+        estimate = self._exact_estimate(targeted_fit)
+        if estimate is None:
+            median_value, density_at_median = _compute_median_from_density(targeted_fit)
+        else:
+            median_value = float(estimate[0])
+            density_at_median = float(np.asarray(targeted_fit['density_at_estimate'], dtype=float).ravel()[0])
         
         # Step 2: Check for very small density values to avoid numerical issues
         if density_at_median < 1e-8:

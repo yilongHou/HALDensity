@@ -1,4 +1,4 @@
-import time
+import warnings
 import numpy as np
 import pandas as pd
 import cvxpy as cp
@@ -6,7 +6,23 @@ from typing import Union, Any, Optional, Sequence
 from pydantic import BaseModel
 from haldensity.core.defaults import DEFAULT_BASIS_ORDER
 from haldensity.core.basis.univariate import create_basis_functions
+from scipy.special import logsumexp
 from haldensity.core.solvers.cvxpy import solve_cvxpy_problem
+from haldensity.core.univariate.normalizer import DEFAULT_MAX_ORDER, log_unnormalized_density
+from haldensity.full_uni.targeting.exact import ExactDensity, cell_edges, converged_rule, log_integral
+
+# the targeted density's log Z may change by at most this much when the nodes per cell double; otherwise the
+# M-step is solved again on the finer rule
+TARGETED_RULE_TOL = 1e-10
+# Newton polishing of the targeting coefficients (bound not binding): stop when every score equation
+# P_n b = E_alpha b holds to SCORE_TOL; interior-point solvers stop near 1e-5 on this problem, and their
+# tight settings rarely report "optimal" here although the solution is good (SCS then ran for minutes)
+SCORE_TOL = 1e-12
+MAX_POLISH_STEPS = 50
+
+
+FALLBACK_WARNING = ("targeted_fit has no exact 'estimate' (made before 0.2.0?); using sums over its fine grid, "
+                    "which are inaccurate where the density changes quickly. Rerun run_m_step.")
 
 
 class TargetingResults(BaseModel):
@@ -22,11 +38,17 @@ class TargetingResults(BaseModel):
     b_jk_targeting: list[list[float]]
     delta_j: list[float]
     grid_eval: list[float]
+    # exact functionals (0.2.0): the target under the targeted density (the TMLE) and under the initial fit
+    estimate: Optional[list[float]] = None
+    plug_in: Optional[list[float]] = None
+    density_at_estimate: Optional[list[float]] = None
+    log_normalizer: Optional[float] = None
+    integration_order: Optional[int] = None
 
 
 class BaseTargetLearner:
-    """Shared M-step logic; subclasses only supply targeting basis constructors and variance."""
-    
+    """Shared M-step logic; subclasses supply the targeting basis, its jump points, the target and its variance."""
+
     def __init__(
         self,
         norm_constraint: int = 20,
@@ -37,7 +59,7 @@ class BaseTargetLearner:
     ):
         """
         Initialize the base target learner.
-        
+
         Parameters
         ----------
         norm_constraint : int, optional
@@ -56,19 +78,82 @@ class BaseTargetLearner:
         self.solver = str(solver).upper()
         self.use_secondary_solver = bool(use_secondary_solver)
         self.solver_waterfall = tuple(str(name).upper() for name in solver_waterfall)
-    
+
     def get_b_ik_targeting(self, uncensored_data: pd.DataFrame, **kwargs) -> np.ndarray:
         """Targeting basis at data points; shape (n_data, n_targeting_basis)."""
         raise NotImplementedError
-    
+
     def get_b_jk_targeting(self, data_grid: pd.DataFrame, **kwargs) -> np.ndarray:
-        """Targeting basis at integration grid; shape (n_grid, n_targeting_basis)."""
+        """Targeting basis at integration points; shape (n_points, n_targeting_basis)."""
         raise NotImplementedError
-    
+
     def get_b_jk_targeting_full(self, data_grid_full: pd.DataFrame, **kwargs) -> np.ndarray:
         """Targeting basis at fine grid; shape (n_grid_full, n_targeting_basis)."""
         raise NotImplementedError
-    
+
+    def targeting_breakpoints(self, **kwargs) -> np.ndarray:
+        """Points where the targeting basis jumps; the integration rule puts cell edges there (none by default)."""
+        return np.zeros(0)
+
+    def target_values(self, density: ExactDensity, **kwargs) -> tuple[np.ndarray, Optional[np.ndarray]]:
+        """(the target under ``density``, the density at the target or None), computed exactly."""
+        raise NotImplementedError
+
+    def _targeting_at(self, x: np.ndarray, kwargs: dict) -> np.ndarray:
+        values = np.asarray(self.get_b_jk_targeting(pd.DataFrame({'W1': x}), **kwargs), dtype=float)
+        return values[:, None] if values.ndim == 1 else values
+
+    def _solve(self, fixed_data, b_ik_targeting, fixed_nodes, b_nodes, weights, n_samples):
+        """The targeting coefficients: -sum_i L(x_i) + n log sum_q w_q exp(L(x_q)), ||alpha||_1 <= bound.
+
+        The solvers' own tolerances, then Newton polishing (:meth:`_polish`) while the bound is not binding."""
+        alpha = cp.Variable(b_ik_targeting.shape[1])
+        loss = (-cp.sum(fixed_data + b_ik_targeting @ alpha)
+                + n_samples * cp.log_sum_exp(np.log(weights) + fixed_nodes + b_nodes @ alpha))
+        problem = cp.Problem(cp.Minimize(loss), [cp.norm1(alpha) <= self.norm_constraint])
+        alpha.value = np.zeros(b_ik_targeting.shape[1])
+        result = solve_cvxpy_problem(
+            problem=problem,
+            primary_solver=self.solver,
+            use_secondary_solver=self.use_secondary_solver,
+            solver_waterfall=self.solver_waterfall,
+            build_solve_kwargs=lambda _solver_name: {"warm_start": True},
+        )
+        alpha_value = self._polish(np.asarray(alpha.value, dtype=float), b_ik_targeting.mean(axis=0), fixed_nodes,
+                                   b_nodes, np.log(weights))
+        return alpha_value, result
+
+    def _polish(self, alpha, data_mean, fixed_nodes, b_nodes, log_weights) -> np.ndarray:
+        """Newton steps on the score equations E_alpha[b] = P_n b while ||alpha||_1 stays inside the bound.
+
+        The objective's gradient is n (E_alpha[b] - P_n b) and its Hessian n Cov_alpha(b), both exact by the
+        rule, so a few steps from the solver's point reach SCORE_TOL. At the bound the equations cannot all
+        hold (the constraint's multiplier is in the optimality conditions): the solver's point is kept."""
+        def residual(a):
+            logits = log_weights + fixed_nodes + b_nodes @ a
+            p = np.exp(logits - logsumexp(logits))
+            mean = p @ b_nodes
+            return mean - data_mean, p, mean
+
+        gradient, p, mean = residual(alpha)
+        for _ in range(MAX_POLISH_STEPS):
+            if np.max(np.abs(gradient)) <= SCORE_TOL or np.abs(alpha).sum() >= self.norm_constraint * (1 - 1e-9):
+                break
+            centred = b_nodes - mean
+            step = -np.linalg.lstsq((centred * p[:, None]).T @ centred, gradient, rcond=None)[0]
+            scale = 1.0
+            while scale > 1e-8:
+                candidate = alpha + scale * step
+                if np.abs(candidate).sum() <= self.norm_constraint:
+                    candidate_gradient, candidate_p, candidate_mean = residual(candidate)
+                    if np.max(np.abs(candidate_gradient)) < np.max(np.abs(gradient)):
+                        alpha, gradient, p, mean = candidate, candidate_gradient, candidate_p, candidate_mean
+                        break
+                scale /= 2
+            else:
+                break
+        return alpha
+
     def run_m_step(
         self,
         uncensored_augmented: pd.DataFrame,
@@ -78,7 +163,7 @@ class BaseTargetLearner:
     ) -> dict[str, Any]:
         """
         Perform an M-step update for a density model.
-        
+
         This function performs an M-step update for a density model that has the form
            f(x) = exp(linear_predictor) / Z,
         where the linear predictor is the sum of two parts:
@@ -86,200 +171,117 @@ class BaseTargetLearner:
          (ii) a new "targeting‐basis" part with free coefficients (α) that are optimized.
 
         Only the targeting basis coefficients are updated; the intercept and the hal‐basis
-        coefficients (old_theta) are kept fixed.
-        
+        coefficients (old_theta) are kept fixed. The normalizing integral is computed exactly
+        (:mod:`haldensity.full_uni.targeting.exact`): cells with edges at the HAL knots and at the
+        points where the targeting basis jumps, Gauss-Legendre inside each cell. So at an optimum
+        inside the L1 bound the score equations hold at the targeting points themselves (e.g. the
+        targeted survival at t equals the empirical survival at t).
+
         Parameters
         ----------
         uncensored_augmented : pd.DataFrame
             A pandas DataFrame containing the uncensored data points.
         grid_points_hal_selected : Union[list, np.ndarray]
-            The hal design grid points.
+            The knots with nonzero coefficients.
         old_theta : Union[list, np.ndarray]
-            The current (fixed) parameter vector for the intercept and hal basis functions.
-            Here, old_theta[0] is the intercept and old_theta[1:] are the hal coefficients.
+            The current (fixed) parameter vector for the intercept and hal basis functions:
+            old_theta[0] is the intercept, then the powers x, ..., x^k (k >= 1) and one
+            coefficient per knot in grid_points_hal_selected.
         **kwargs
             Additional method-specific parameters passed to targeting basis methods.
-            
+
         Returns
         -------
         dict[str, Any]
-            A dictionary with updated parameters and estimated density on a fine grid.
+            The targeting coefficients, the targeted density on a fine grid, and the exact
+            functionals: ``estimate`` (the target under the targeted density, the TMLE),
+            ``plug_in`` (under the initial fit), ``density_at_estimate`` (median only),
+            ``log_normalizer``, ``integration_order`` and ``score_residual`` (the largest
+            |E[b] - P_n b| over the targeting basis; about 1e-12 unless the L1 bound binds).
         """
-        # ----------------------------
-        # 1. Design matrix construction
-        # ----------------------------
-        start_time_m_design = time.time()
-
-        # Use the hal grid from the previous iteration
-        grid_points_hal = grid_points_hal_selected  # for hal-basis
-        uncensored_data = uncensored_augmented.copy()
-
-        # Create hal basis design matrix for uncensored data
-        basis_tensor, _ = create_basis_functions(
-            uncensored_data,
-            grid_points_hal,
-            order=self.basis_order,
-            include_intercept=False,
-        )
-        b_ik = basis_tensor  # numpy array
-
-        # Create targeting basis design matrix for uncensored data
+        old_theta = np.asarray(old_theta, dtype=float).ravel()
+        hal_knots = np.asarray(grid_points_hal_selected, dtype=float).ravel()
+        k = self.basis_order
         # Backward-compat: some learners (e.g., Median) expect underscored keys
-        _compat_kwargs = {
-            **kwargs,
-            '_old_theta': old_theta,
-            '_grid_points_hal_selected': grid_points_hal_selected,
-        }
-        b_ik_targeting = self.get_b_ik_targeting(uncensored_data, **_compat_kwargs)
+        kwargs = {**kwargs, '_old_theta': old_theta, '_grid_points_hal_selected': hal_knots}
 
-        # Create an evaluation grid (here 200 points) for computing the normalization constant.
-        grid_eval = np.linspace(0, 1, 2001)
-        combined_grid = np.concatenate((grid_eval, grid_points_hal_selected))
-        filtered_grid = combined_grid[combined_grid >= 0]
-        filtered_grid = np.unique(filtered_grid)
-        grid_eval = np.sort(filtered_grid)
+        def fixed(x: np.ndarray) -> np.ndarray:
+            """The initial fit's log-density up to its constant: intercept, powers and selected knots."""
+            return log_unnormalized_density(x, old_theta, hal_knots, k)
 
-        # Compute midpoints for integration
-        grid_midpoints = (grid_eval[:-1] + grid_eval[1:]) / 2
-        data_grid = pd.DataFrame({'W1': grid_midpoints})
+        uncensored_data = uncensored_augmented.copy()
+        n_samples = len(uncensored_data)
+        fixed_data = fixed(uncensored_data['W1'].to_numpy(dtype=float))
+        b_ik_targeting = np.asarray(self.get_b_ik_targeting(uncensored_data, **kwargs), dtype=float)
+        if b_ik_targeting.ndim == 1:
+            b_ik_targeting = b_ik_targeting[:, None]
 
-        # Evaluate hal basis on the integration grid
-        basis_grid_tensor, _ = create_basis_functions(
-            data_grid,
-            grid_points_hal,
-            order=self.basis_order,
-            include_intercept=False,
-        )
-        b_jk = basis_grid_tensor  # numpy array
+        # exact integration: cells at the knots and the targeting jumps, nodes doubled until log Z settles
+        edges = cell_edges(np.concatenate([hal_knots, np.ravel(self.targeting_breakpoints(**kwargs))]))
+        rule = converged_rule(fixed, edges)
+        while True:
+            theta_targeting, solve_result = self._solve(fixed_data, b_ik_targeting, fixed(rule.points),
+                                                        self._targeting_at(rule.points, kwargs), rule.weights,
+                                                        n_samples)
 
-        # Evaluate targeting basis on the integration grid
-        b_jk_targeting = self.get_b_jk_targeting(data_grid, **_compat_kwargs)
+            def targeted(x: np.ndarray, alpha: np.ndarray = theta_targeting) -> np.ndarray:
+                return fixed(x) + self._targeting_at(x, kwargs) @ alpha
 
-        end_time_m_design = time.time()
-        m_step_time_design = end_time_m_design - start_time_m_design
-        # design time available if needed: m_step_time_design
+            if 2 * rule.order > DEFAULT_MAX_ORDER:
+                break
+            finer = rule.finer()
+            if abs(log_integral(targeted, finer) - log_integral(targeted, rule)) <= TARGETED_RULE_TOL:
+                break
+            rule = finer
 
-        # ----------------------------
-        # 2. Set up the optimization problem
-        # ----------------------------
-        start_time_m_optimize = time.time()
+        targeted_density = ExactDensity(targeted, rule)
+        # the largest score-equation error, |E_alpha[b] - P_n b| (about 1e-12 unless the L1 bound binds)
+        mass = rule.weights * np.exp(targeted(rule.points) - targeted_density.log_z)
+        score_residual = float(np.max(np.abs(mass @ self._targeting_at(rule.points, kwargs)
+                                             - b_ik_targeting.mean(axis=0))))
+        estimate, density_at_estimate = self.target_values(targeted_density, **kwargs)
+        plug_in, _ = self.target_values(ExactDensity(fixed, rule), **kwargs)
 
-        # Compute the fixed (hal-basis) part of the linear predictor:
-        #   fixed = intercept + (hal_basis dot old_hal_coefficients)
-        # For uncensored data:
-        fixed_data = old_theta[0] + np.dot(b_ik, old_theta[1:])
-        # For the integration grid:
-        fixed_grid = old_theta[0] + np.dot(b_jk, old_theta[1:])
-        # --- Set weights to 1 by default ---
-        weights_M = np.ones(len(uncensored_data))
-        n_samples_weighted = np.sum(weights_M)
-
-        # Compute the widths (delta) for integration and their logarithms
-        delta_j = grid_eval[1:] - grid_eval[:-1]
-        log_delta_j = np.log(delta_j)
-
-        # The only free parameter is the targeting basis coefficient vector.
-        # Its dimension is determined by the number of targeting basis functions.
-        r = b_ik_targeting.shape[1]
-        alpha = cp.Variable(r)
-
-        # Define the full linear predictor by adding the targeting part:
-        # For data points:
-        L_data = fixed_data + b_ik_targeting @ alpha  # shape: (n_data,)
-        # For grid points:
-        L_grid = fixed_grid + b_jk_targeting @ alpha    # shape: (n_grid,)
-
-        # Formulate the (negative) log-likelihood.
-        # Data term:  -sum_i weights[i] * (fixed + targeting_effect)
-        data_term = -cp.sum(cp.multiply(weights_M, L_data))
-        # Normalization term:  n_samples_weighted * log_sum_exp( log(delta_j) + L_grid )
-        norm_term = n_samples_weighted * cp.log_sum_exp(log_delta_j + L_grid)
-        loss = data_term + norm_term
-
-        # Optionally, we include a norm constraint on the targeting coefficients.
-        constraints = [cp.norm1(alpha) <= self.norm_constraint]
-
-        objective = cp.Minimize(loss)
-        problem = cp.Problem(objective, constraints)
-
-        # Warm start: initialize alpha (you may change this if you have a previous guess)
-        alpha.value = np.zeros(r)
-
-        solve_cvxpy_problem(
-            problem=problem,
-            primary_solver=self.solver,
-            use_secondary_solver=self.use_secondary_solver,
-            solver_waterfall=self.solver_waterfall,
-            build_solve_kwargs=lambda _solver_name: {"warm_start": True},
-        )
-
-
-        end_time_m_optimize = time.time()
-        m_step_time_optimize = end_time_m_optimize - start_time_m_optimize
-        # print(f"M-step CVXPY optimize time (sec): {m_step_time_optimize:.4f}")
-
-        # ----------------------------
-        # 3. Compute the estimated density on a fine grid
-        # ----------------------------
-        # Retrieve the optimized targeting coefficients
-        theta_targeting = alpha.value
-
-        # The fixed hal-basis parameters remain the same:
-        theta_intercept = old_theta[0]
-        theta_selected = old_theta[1:]
-
-        # Now, evaluate the density on a fine grid (here 2000 points)
-        grid_eval_fine = np.linspace(0, 1, 2001)
-        combined_grid_fine = np.concatenate((grid_eval_fine, grid_points_hal_selected))
-        filtered_grid_fine = combined_grid_fine[combined_grid_fine >= 0]
-        filtered_grid_fine = np.unique(filtered_grid_fine)
-        grid_eval_full = np.sort(filtered_grid_fine)
-
+        # the targeted density on a fine grid (for plots), normalized exactly
+        grid_eval_full = np.unique(np.concatenate((np.linspace(0, 1, 2001), hal_knots[hal_knots >= 0])))
         grid_midpoints_full = (grid_eval_full[:-1] + grid_eval_full[1:]) / 2
         data_grid_full = pd.DataFrame({'W1': grid_midpoints_full})
+        b_jk_full, _ = create_basis_functions(data_grid_full, hal_knots, order=k, include_intercept=False)
 
-        # Evaluate hal basis on the fine grid
-        basis_grid_tensor_full, _ = create_basis_functions(
-            data_grid_full,
-            grid_points_hal,
-            order=self.basis_order,
-            include_intercept=False,
-        )
-        b_jk_full = basis_grid_tensor_full  # numpy array
-
-        # Evaluate targeting basis on the fine grid
-        b_jk_targeting_full = self.get_b_jk_targeting_full(data_grid_full, **_compat_kwargs)
-
-        delta_j_full = grid_eval_full[1:] - grid_eval_full[:-1]
-
-        # The estimated log-density is the sum of the fixed (hal) part and the optimized targeting part.
-        estimated_log_density = theta_intercept + b_jk_full @ theta_selected + b_jk_targeting_full @ theta_targeting
-        max_ld = np.max(estimated_log_density)
-        f_u = np.exp(estimated_log_density - max_ld)
-        estimated_density = f_u / np.sum(f_u * delta_j_full)
-
-        # ----------------------------
-        # 4. Package and return results
-        # ----------------------------
-        updated_results = {
+        return {
             "old_theta": old_theta,               # fixed intercept and hal-basis coefficients
             "theta_targeting": theta_targeting,     # newly optimized targeting coefficients
-            "theta_intercept": theta_intercept,
-            "theta_selected": theta_selected,
-            "estimated_density": estimated_density,
+            "theta_intercept": old_theta[0],
+            "theta_selected": old_theta[1:],
+            "estimated_density": targeted_density.density(grid_midpoints_full),
             "grid_midpoints": grid_midpoints_full,
             "grid_points_hal_selected": grid_points_hal_selected,
             "b_jk": b_jk_full,
-            "b_jk_targeting": b_jk_targeting_full,
-            "delta_j": delta_j_full,
+            "b_jk_targeting": self.get_b_jk_targeting_full(data_grid_full, **kwargs),
+            "delta_j": np.diff(grid_eval_full),
             "grid_eval": grid_eval_full,
+            "estimate": np.asarray(estimate, dtype=float),
+            "plug_in": np.asarray(plug_in, dtype=float),
+            "density_at_estimate": None if density_at_estimate is None else np.asarray(density_at_estimate, dtype=float),
+            "log_normalizer": targeted_density.log_z,
+            "integration_order": rule.order,
+            "solver_used": solve_result.solver_used,
+            "solver_status": solve_result.status,
+            "score_residual": score_residual,
         }
 
-        return updated_results
-    
     def get_estimand_variance(self, targeted_fit: dict[str, Any], uncensored_data: pd.DataFrame, **kwargs) -> Union[float, np.ndarray]:
         """Return variance(s) of estimand(s) via EIC; to be implemented by subclasses."""
         raise NotImplementedError
+
+    @staticmethod
+    def _exact_estimate(targeted_fit: dict[str, Any]) -> Optional[np.ndarray]:
+        """The fit's exact estimate, or None (with a warning) for a fit made before 0.2.0."""
+        estimate = targeted_fit.get("estimate")
+        if estimate is None:
+            warnings.warn(FALLBACK_WARNING, UserWarning, stacklevel=3)
+            return None
+        return np.atleast_1d(np.asarray(estimate, dtype=float))
 
     @staticmethod
     def to_results_model(results: dict[str, Any]) -> TargetingResults:
@@ -287,7 +289,7 @@ class BaseTargetLearner:
         def as_list(x):
             if x is None:
                 return None
-            return x.tolist() if isinstance(x, np.ndarray) else list(x)
+            return np.atleast_1d(x).tolist() if isinstance(x, np.ndarray) else list(x)
 
         return TargetingResults(
             old_theta=as_list(results["old_theta"]),
@@ -301,4 +303,9 @@ class BaseTargetLearner:
             b_jk_targeting=[list(map(float, row)) for row in np.atleast_2d(results["b_jk_targeting"]).tolist()],
             delta_j=as_list(results["delta_j"]),
             grid_eval=as_list(results["grid_eval"]),
+            estimate=as_list(results.get("estimate")),
+            plug_in=as_list(results.get("plug_in")),
+            density_at_estimate=as_list(results.get("density_at_estimate")),
+            log_normalizer=None if results.get("log_normalizer") is None else float(results["log_normalizer"]),
+            integration_order=None if results.get("integration_order") is None else int(results["integration_order"]),
         )

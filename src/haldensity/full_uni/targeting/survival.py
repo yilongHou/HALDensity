@@ -3,6 +3,7 @@ import pandas as pd
 from typing import Union, Any, Tuple
 from haldensity.core.defaults import DEFAULT_BASIS_ORDER
 from haldensity.full_uni.targeting.base import BaseTargetLearner
+from haldensity.full_uni.targeting.exact import ExactDensity
 from haldensity.full_uni.targeting.survival_basis import create_targeting_basis_functions
 from haldensity.core.basis.univariate import create_basis_functions
 from haldensity.core.univariate.functionals import generic_compute_survival_from_density
@@ -51,7 +52,15 @@ class SurvivalTargetLearner(BaseTargetLearner):
     This learner creates targeting basis functions based on cumulative indicators
     using greater-than comparisons with grid points (survival functions).
     """
-    
+
+    def targeting_breakpoints(self, **kwargs) -> np.ndarray:
+        """The indicators I(x > t) jump at the targeting points: they are cell edges of the M-step's rule."""
+        return np.asarray(kwargs['targeting_points'], dtype=float)
+
+    def target_values(self, density: ExactDensity, **kwargs) -> tuple[np.ndarray, None]:
+        """S(t) = P(X > t) at the targeting points, exactly."""
+        return density.survival(np.asarray(kwargs['targeting_points'], dtype=float)), None
+
     def get_b_ik_targeting(self, uncensored_data: pd.DataFrame, **kwargs) -> np.ndarray:
         """
         Create targeting basis design matrix for uncensored data based on survival indicators.
@@ -162,12 +171,13 @@ class SurvivalTargetLearner(BaseTargetLearner):
             Estimated variances for each targeting point, shape (n_targeting_points,).
         """
         targeting_points = kwargs['targeting_points']
-        
-        # Step 1: Compute survival function from the targeted density
-        survival, grid_surv = _compute_survival_from_density(targeted_fit)
-        
-        # Step 2: Interpolate survival probabilities at targeting points
-        survival_targeting = np.interp(targeting_points, grid_surv, survival, left=1.0, right=0.0)
+
+        # Steps 1-2: the targeted survival at the targeting points, exact (the M-step's estimate); the sample
+        # variance below does not depend on it, but the EIC values do
+        survival_targeting = self._exact_estimate(targeted_fit)
+        if survival_targeting is None:
+            survival, grid_surv = _compute_survival_from_density(targeted_fit)
+            survival_targeting = np.interp(targeting_points, grid_surv, survival, left=1.0, right=0.0)
         
         # Step 3: Build the targeting basis for the data (I(x > t) terms)
         # Note: We use order=0 to get step function indicators as in research code

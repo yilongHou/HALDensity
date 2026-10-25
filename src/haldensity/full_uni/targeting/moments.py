@@ -3,6 +3,7 @@ import pandas as pd
 from typing import Union, Any
 from haldensity.core.defaults import DEFAULT_BASIS_ORDER
 from haldensity.full_uni.targeting.base import BaseTargetLearner
+from haldensity.full_uni.targeting.exact import ExactDensity
 from haldensity.core.univariate.functionals import generic_compute_moment_from_density
 
 
@@ -43,7 +44,11 @@ class MomentsTargetLearner(BaseTargetLearner):
     
     This learner creates targeting basis functions based on powers of the data points.
     """
-    
+
+    def target_values(self, density: ExactDensity, **kwargs) -> tuple[np.ndarray, None]:
+        """E[X^k] for k = x_moment, exactly (the power is smooth: no extra cell edges)."""
+        return np.array([density.moment(int(kwargs.get('x_moment', 1)))]), None
+
     def get_b_ik_targeting(self, uncensored_data: pd.DataFrame, **kwargs) -> np.ndarray:
         """
         Create targeting basis design matrix for uncensored data based on moments.
@@ -147,8 +152,10 @@ class MomentsTargetLearner(BaseTargetLearner):
         """
         x_moment = kwargs.get('x_moment', 1)  # Default to first moment if not specified
         
-        # Step 1: Compute k-th moment from the targeted density
-        moment_value = _compute_moment_from_density(targeted_fit, x_moment)
+        # Step 1: the targeted k-th moment, exact (the M-step's estimate); the sample variance below does
+        # not depend on it, but the EIC values do
+        estimate = self._exact_estimate(targeted_fit)
+        moment_value = _compute_moment_from_density(targeted_fit, x_moment) if estimate is None else float(estimate[0])
         
         # Step 2: Create data values raised to the k-th power
         data_values = uncensored_data['W1'].values

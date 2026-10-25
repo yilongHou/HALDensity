@@ -242,6 +242,28 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   fits (MOSEK): on Galaxies (k = 2, M = 596,793) the centre rises by 5.4% and the SE by 4-12% (ridge 1e-6)
   or 4-15% (ridge 1e-10); for the k = 0 fit (n = 400) both rise by 1.2%; for the k = 1 and 2 fits of simulated
   data the centre moves by less than 6e-5 and the SE by less than 8e-4 relative. Fits are unchanged.
+- **Full-data targeting integrates exactly** (Yilong, 2026-10-24; full data, univariate): the M-step's
+  normalizer, the plug-in and TMLE functionals and the median's EIC variance were sums over a 5e-4 grid, so the
+  score equations held at the nearest grid cell, not at the targeting point (on Galaxies the targeted survival
+  at t = 0.0667, where the density is about 73, missed the empirical survival by 0.012). The integrals now use
+  cells with edges at the knots and at the points where the targeting basis jumps (the targeting points, or the
+  initial fit's median), with Gauss-Legendre inside each cell, doubled until log Z changes by less than 1e-12
+  (`haldensity.full_uni.targeting.exact`). After the solver, a few Newton steps on the targeting coefficients
+  (while the L1 bound is not binding) bring the score equations to about 1e-12. `run_m_step` also returns the
+  exact values: `estimate` (the TMLE), `plug_in` (the initial fit's value), `density_at_estimate` (median),
+  `log_normalizer`, `integration_order`, `score_residual`, `solver_used` and `solver_status`; its
+  `estimated_density` on the fine grid is normalized exactly, and the variance functions use the exact estimate
+  (a results dict without one falls back to the grid sums with a warning). The initial median that the median
+  learner targets is computed exactly (it was read off a 2,001-point grid). Galaxies (k = 2; bound 100; survival
+  at the old notebook's ten points, the mean, the median): every score equation holds to 2e-13 at the case
+  study's fit (200 grid points, M = 596,793) and to 6e-16 at 1,000 points (M = 653,813); a survival M-step
+  takes 0.2-0.4 s. Before/after on two fixed fits of simulated data (n = 400, k = 0 and 2): the score-equation
+  errors fall from up to 1.0e-3 (survival) and 4.8e-4 (mean) to below 1e-15, the TMLE values move by up to
+  1.0e-3, the survival and mean variances are unchanged (sample variances of the data), and the median's
+  variance moves by 0.7% (k = 2) and 33% (k = 0, whose density at the median is a step). The median learner
+  remains one targeting step at the initial median m0: F(m0) = P_n(X < m0) now holds exactly, but the
+  targeted median need not be an empirical median (Galaxies: P_n(X <= median) = 43/82 with 200 points, 39/82
+  with 1,000). The right-censored targeting keeps its grids (RC project).
 - Full-data CV can apply the conservative adjustment (core, shared with the censored-data tuners
   through `haldensity.core.cv.conservative`): after the search, the smallest bound whose mean CV
   log-likelihood is within 5% of a fold SD of the best, found by bracketing and bisection in log M.
