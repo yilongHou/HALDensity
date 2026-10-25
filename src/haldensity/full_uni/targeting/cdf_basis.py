@@ -38,4 +38,4 @@ def create_targeting_basis_functions(
     """Create targeting basis functions (numpy) based on CDF indicators I(x <= t)."""
     indicators = create_cumulative_indicators_le(data_long_train['W1'], grid_points, prefix=prefix)
     basis_df = pd.concat([indicators], axis=1)
-    return basis_df.values.astype(np.float32)
+    return basis_df.values.astype(np.float64)

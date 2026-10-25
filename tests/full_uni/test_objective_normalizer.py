@@ -19,8 +19,8 @@ def data():
 
 def test_default_matches_the_pre_option_problem(data):
     # the objective exactly as CVXPYEstimator built it before objective_normalizer / max_knots, with the
-    # n x m float32 data basis; the fit now uses the exact float64 column sums of that basis, so the
-    # solutions agree to the float32 rounding (identical at k = 0, whose basis is 0/1)
+    # n x m data basis; the fit now uses the exact column sums of that basis, so the solutions agree to
+    # the solver's accuracy (the basis was float32 before 0.2.0, which also agreed to its rounding)
     for k in (0, 1):
         knots = np.unique(data["W1"].dropna())
         b_ik = create_basis_functions(data, knots, order=k)[0]

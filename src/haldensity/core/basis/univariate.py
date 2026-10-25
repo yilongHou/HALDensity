@@ -35,11 +35,11 @@ def create_basis_functions(
     if order == 0:
         # Basis: {1, I(x >= ξ₁), I(x >= ξ₂), ..., I(x >= ξₘ)}
         if include_intercept:
-            basis_list.append(np.ones(n, dtype=np.float32))
+            basis_list.append(np.ones(n, dtype=np.float64))
             basis_names.append("Intercept")
         
         # Vectorized indicator functions
-        indicators = (x[:, np.newaxis] >= grid_points[np.newaxis, :]).astype(np.float32)
+        indicators = (x[:, np.newaxis] >= grid_points[np.newaxis, :]).astype(np.float64)
         for j in range(m):
             basis_list.append(indicators[:, j])
             basis_names.append(f"I(x >= {grid_points[j]:.6f})")
@@ -47,15 +47,15 @@ def create_basis_functions(
         # Basis: {1, x, x², ..., x^k, (x-ξ₁)₊^k, (x-ξ₂)₊^k, ..., (x-ξₘ)₊^k}
         for power in range(order + 1):
             if power == 0 and include_intercept:
-                basis_list.append(np.ones(n, dtype=np.float32))
+                basis_list.append(np.ones(n, dtype=np.float64))
                 basis_names.append("Intercept")
             elif power > 0:
-                basis_list.append((x ** power).astype(np.float32))
+                basis_list.append((x ** power).astype(np.float64))
                 basis_names.append(f"x^{power}")
         
         # Truncated power terms
         for knot in grid_points:
-            basis_list.append((np.maximum(x - knot, 0) ** order).astype(np.float32))
+            basis_list.append((np.maximum(x - knot, 0) ** order).astype(np.float64))
             basis_names.append(f"(x - {knot:.6f})_+^{order}")
     
     basis_array = np.column_stack(basis_list)

@@ -203,6 +203,20 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
 
 ### Changed (behaviour)
 
+- **Every basis and design matrix is built in float64** (Yilong, 2026-10-24; core):
+  `create_basis_functions`, the multivariate tensor basis (`create_multivariate_basis`) and the full-data
+  targeting bases were float32 since the package's first commit, for no recorded reason. Full-data fits and
+  their optimality check already ran in float64 (the lean data term), so full-data point estimates are
+  unchanged bit for bit; what moves is every quantity that used the float32 basis. Before/after on 14 fixed
+  fits (MOSEK): the delta-method SE by at most 1.7e-6 relative on simulated data and 3.9e-5 on Galaxies
+  (k = 2, M = 596,793, ridge 1e-6 or 1e-10); full-data targeting coefficients by at most 1.1e-4 relative
+  (k = 2); right- and interval-censored k = 1 densities by at most 1e-6 relative (their coefficients by up to
+  2.9e-4, along a poorly determined direction); the multivariate k = 1 density by 5e-4 relative (coefficients
+  by up to 13%: 1,004 columns and 512 normalizer points do not determine them); every k = 0 fit is identical
+  (its basis is 0/1). Memory: a design matrix on its own doubles (n = 10,000 with every knot: 400 to 800 MB;
+  multivariate d = 2, k = 1, n = 2,000: 80 to 160 MB), but whole fits do not grow, because CVXPY keeps its
+  own float64 copy: peak memory of an IPCW right-censored fit at n = 3,200 466 vs 464 MB, interval-censored
+  n = 1,600 338 vs 345 MB, multivariate d = 2, n = 500 1,395 vs 1,348 MB; times unchanged.
 - Full-data CV can apply the conservative adjustment (core, shared with the censored-data tuners
   through `haldensity.core.cv.conservative`): after the search, the smallest bound whose mean CV
   log-likelihood is within 5% of a fold SD of the best, found by bracketing and bisection in log M.

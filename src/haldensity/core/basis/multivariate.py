@@ -80,8 +80,8 @@ def _format_truncated_term(var_name: str, knot: float, k: int) -> str:
 
 def _truncated_component(values: np.ndarray, knot: float, k: int) -> np.ndarray:
     if k == 0:
-        return (values >= knot).astype(np.float32)
-    return (np.maximum(values - knot, 0.0) ** k).astype(np.float32)
+        return (values >= knot).astype(np.float64)
+    return (np.maximum(values - knot, 0.0) ** k).astype(np.float64)
 
 
 def _term_type_label(family: str, section_size: int, dimension: int) -> str:
@@ -257,7 +257,7 @@ def create_multivariate_basis(
         section_size = len(section)
         basis_index = len(basis_names)
         basis_names.append(name)
-        basis_columns.append(np.asarray(column, dtype=np.float32))
+        basis_columns.append(np.asarray(column, dtype=np.float64))
         metadata_rows.append(
             {
                 "basis_index": basis_index,
@@ -283,12 +283,12 @@ def create_multivariate_basis(
         if not include_intercept and all(power == 0 for power in exponents):
             continue
 
-        column = np.ones(n_eval, dtype=np.float32)
+        column = np.ones(n_eval, dtype=np.float64)
         factors: list[str] = []
         for idx, power in enumerate(exponents):
             if power == 0:
                 continue
-            column *= (x_eval[:, idx] ** power).astype(np.float32)
+            column *= (x_eval[:, idx] ** power).astype(np.float64)
             factors.append(_format_power_term(variable_names[idx], power))
 
         name = _format_polynomial_name(
@@ -313,13 +313,13 @@ def create_multivariate_basis(
 
             for knot_row, knot_values in enumerate(x_knots):
                 for exponents in exponent_grid:
-                    column = np.ones(n_eval, dtype=np.float32)
+                    column = np.ones(n_eval, dtype=np.float64)
                     factors: list[str] = []
 
                     for comp_idx, power in zip(complement, exponents):
                         if power == 0:
                             continue
-                        column *= (x_eval[:, comp_idx] ** power).astype(np.float32)
+                        column *= (x_eval[:, comp_idx] ** power).astype(np.float64)
                         factors.append(
                             _format_power_term(variable_names[comp_idx], power)
                         )
@@ -349,7 +349,7 @@ def create_multivariate_basis(
                         knot_values=knot_values,
                     )
 
-    basis_matrix = np.column_stack(basis_columns).astype(np.float32)
+    basis_matrix = np.column_stack(basis_columns).astype(np.float64)
     metadata = pd.DataFrame(metadata_rows)
     return basis_matrix, basis_names, metadata
 

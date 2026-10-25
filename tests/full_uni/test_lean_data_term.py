@@ -21,9 +21,10 @@ def _x(n=400, seed=0):
 def test_data_sums_are_the_basis_column_sums(k):
     x = _x()
     knots = np.unique(x)
-    basis = create_basis_functions(pd.DataFrame({"W1": x}), knots, order=k)[0].astype(np.float64)
-    # the float32 basis is the only difference (relative ~1e-7); exact float64 sums below
-    np.testing.assert_allclose(data_basis_sums(x, knots, k), basis.sum(axis=0), rtol=1e-5, atol=1e-6)
+    basis = create_basis_functions(pd.DataFrame({"W1": x}), knots, order=k)[0]
+    # the basis is float64 (float32 before 0.2.0, which differed by about 1e-7 relative)
+    assert basis.dtype == np.float64
+    np.testing.assert_allclose(data_basis_sums(x, knots, k), basis.sum(axis=0), rtol=1e-12, atol=1e-12)
     exact = np.array([np.sum(np.maximum(x - xi, 0.0) ** k) if k else np.sum(x >= xi) for xi in knots[:20]])
     np.testing.assert_allclose(data_basis_sums(x, knots, k)[1 + k:21 + k], exact, rtol=1e-13)
 

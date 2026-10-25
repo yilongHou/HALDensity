@@ -73,7 +73,7 @@ def log_unnormalized_density(
     basis_order: int,
     chunk: int = 4096,
 ) -> np.ndarray:
-    """``f(x) = theta' phi(x)`` in float64 (the package's basis matrices are float32)."""
+    """``f(x) = theta' phi(x)`` in float64, without building the basis matrix."""
     x = np.asarray(points, dtype=float).ravel()
     theta = np.asarray(theta, dtype=float).ravel()
     k = int(basis_order)
