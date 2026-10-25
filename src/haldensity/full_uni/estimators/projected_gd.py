@@ -177,7 +177,7 @@ class ProjectedGDEstimator(BaseEstimator):
                 if self.do_log:
                     self.logger.info(f"Validation at iter {it}: sum_log_likelihood={validation_sum_log_likelihood:.6f}")
 
-            if it % self.log_frequency == 0:
+            if self.do_log and it % self.log_frequency == 0:
                 l1_norm = float(np.sum(np.abs(theta[1:])))
                 num_selected_knots = int(np.sum(np.abs(theta[1:]) > self.tol))
                 if self.do_log:

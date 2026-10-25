@@ -23,7 +23,7 @@ def test_public_signatures():
     assert _public(CVXPYEstimator) == ["norm_constraint", "basis_order", "max_knots", "n_grid_points",
                                        "solver_threads", "log_dir", "log_frequency"]
     assert _public(OptunaHyperparameterTuner) == [
-        "estimator_name", "data", "cv_folds", "metric", "random_state", "max_iter", "tolerance", "log_frequency",
+        "estimator_name", "data", "cv_folds", "metric", "random_state", "max_iter", "tolerance",
         "silent", "show_progress", "param_overrides", "estimator_kwargs", "use_conservative_adjustment",
         "conservative_selection_rule", "conservative_k_percent", "conservative_se_multiplier"]
     assert _public(estimate_covariance_beta) == ["data", "estimation_results", "basis_order", "support_refit"]

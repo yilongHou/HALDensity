@@ -184,10 +184,10 @@ class ProximalNewtonLBFGSEstimator(BaseEstimator):
             
         Logging Parameters:
         ==================
-        log_dir : str, default="./local/logs/experiment.log"
+        log_dir : str or None, default=None (no log file)
             Directory for logging output.
             
-        log_frequency : int, default=10
+        log_frequency : int, default=-1 (no logging)
             Frequency of iteration logging. Set to -1 to disable logging.
             
         Key Algorithmic Differences from Full L-BFGS:

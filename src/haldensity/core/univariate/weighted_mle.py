@@ -51,9 +51,9 @@ class WeightedHALMLEEstimator(BaseEstimator):
     solver : str
         CVXPY solver to use.
     log_dir : str | None
-        Directory for logging.
+        Log file path; None (default) writes no log (before 0.2.0: ./local/logs/cvxpy.log).
     log_frequency : int
-        Frequency of logging (-1 = no logging).
+        Frequency of logging when log_dir is given (default 10; <= 0 = no logging).
     use_secondary_solver : bool
         Whether to try fallback solvers on failure.
     solver_waterfall : list[str]
@@ -81,7 +81,7 @@ class WeightedHALMLEEstimator(BaseEstimator):
         super().__init__(
             tol=tol,
             basis_order=basis_order,
-            log_dir=log_dir or "./local/logs/cvxpy.log",
+            log_dir=log_dir,
             log_frequency=log_frequency,
         )
         self.norm_constraint = norm_constraint

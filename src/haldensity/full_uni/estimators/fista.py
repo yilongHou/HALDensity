@@ -175,7 +175,7 @@ class FISTAEstimator(BaseEstimator):
                 if self.do_log:
                     self.logger.info(f"Validation at iter {k}: sum_log_likelihood={validation_sum_log_likelihood:.6f}")
             
-            if k % self.log_frequency == 0:
+            if self.do_log and k % self.log_frequency == 0:
                 l1norm = float(np.sum(np.abs(theta_cur[1:])))
                 num_selected_knots = int(np.sum(np.abs(theta_cur[1:]) > self.tol))
                 loss_val = float(obj_current)

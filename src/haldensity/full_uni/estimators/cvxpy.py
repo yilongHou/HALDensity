@@ -120,7 +120,9 @@ class CVXPYEstimator(BaseEstimator):
             solver_threads: threads per solver call (default 1: MOSEK, CLARABEL and the BLAS/OpenMP
                 pools run single-threaded, so parallel runs on shared servers do not take other
                 people's cores). Raise it when one fit runs alone on a dedicated machine.
-            log_dir, log_frequency: per-fit log file (log_frequency <= 0 turns it off).
+            log_dir, log_frequency: a per-fit log file, written only when log_dir (its path) is given
+                (default None: no file; before 0.2.0 ./local/logs/cvxpy.log); log_frequency <= 0 turns it
+                off. Through the tuner: estimator_kwargs={"log_dir": ..., "log_frequency": ...}.
 
         The fit is one tight solve checked against the optimality conditions (MOSEK 1e-12, then
         CLARABEL, ECOS and SCS with tight tolerances, the SCS step capped at 600 s); the first solution
@@ -148,7 +150,7 @@ class CVXPYEstimator(BaseEstimator):
             normalizer=_normalizer,
             tol=_tol,
             basis_order=basis_order,
-            log_dir=log_dir or "./local/logs/cvxpy.log",
+            log_dir=log_dir,
             log_frequency=log_frequency,
         )
         self.norm_constraint = norm_constraint

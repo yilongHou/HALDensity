@@ -91,7 +91,7 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   `CVXPYEstimator`: `norm_constraint`, `basis_order`, `max_knots` (None = every knot), `n_grid_points`
   (the one exception, see the next item), `solver_threads`, `log_dir`, `log_frequency`; of
   `OptunaHyperparameterTuner`: `cv_folds`, `metric`, `random_state`,
-  `max_iter` and `tolerance` (first-order estimators), `log_frequency`, `silent`, `show_progress`,
+  `max_iter` and `tolerance` (first-order estimators), `silent`, `show_progress`,
   `param_overrides`, `estimator_kwargs`, `use_conservative_adjustment` and its margin settings; of the
   variance functions: `support_refit` and `alpha`. Options that were public in 0.1.0 still work through
   0.2.x with a `DeprecationWarning` naming the internal replacement and are removed in 0.3.0:
@@ -155,6 +155,15 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   `logging.getLogger` (which keeps every logger, and its open file, for the life of the process). In
   0.1.0 each fit with logging on held one open file, about 250 per CV task (Yilong, 2026-10-24,
   decision 9). Logs are still written to `log_dir` and started afresh for each estimator.
+- **No log file unless `log_dir` is given** (Yilong, 2026-10-24; core and full data): `CVXPYEstimator` and the
+  weighted MLE (the censored-data initial estimators) wrote `./local/logs/cvxpy.log` by default, in every CV
+  fold; now they log only when `log_dir` (the file's path) is given, and `log_frequency` still defaults to 10
+  for them. **If you relied on the default file**, pass `log_dir="./local/logs/cvxpy.log"` (through the tuner:
+  `estimator_kwargs={"log_dir": ..., "log_frequency": ...}`). The tuner's 0.1.0 option `log_frequency` never
+  reached the fold estimators; it now only warns (`DeprecationWarning`, removed in 0.3.0). The FISTA, proximal
+  GD and projected GD estimators no longer compute logging statistics when logging is off, and
+  `log_frequency=0` no longer raises `ZeroDivisionError` there. A CV run and its final fit in an empty
+  directory leave it empty (tested).
 - **Solver calls are single-threaded by default** (`solver_threads=1`; Yilong, 2026-10-24, for
   shared servers): per call through MOSEK's `MSK_IPAR_NUM_THREADS` and CLARABEL's `max_threads`,
   and the numpy/scipy BLAS/OpenMP pools limited with `threadpoolctl` during the call; SCS and ECOS

@@ -39,3 +39,37 @@ def test_each_estimator_starts_its_log_afresh(tmp_path):
     est.get_results()
     text = log.read_text()
     assert "old run" not in text and "selected knots" in text
+
+
+def test_no_log_file_unless_log_dir_is_given(tmp_path, monkeypatch):
+    # quiet default (Yilong, 2026-10-24): before, CVXPYEstimator and the weighted MLE wrote ./local/logs/cvxpy.log
+    # in every CV fold
+    from haldensity.full_uni import OptunaHyperparameterTuner
+    from haldensity.rc.estimators import RightCensoredInitEstimator
+
+    monkeypatch.chdir(tmp_path)
+    data = pd.DataFrame({"W1": np.random.default_rng(2).beta(2.0, 5.0, size=80)})
+    CVXPYEstimator(norm_constraint=5.0, basis_order=1).fit(data).get_results()
+    RightCensoredInitEstimator(norm_constraint=5.0, basis_order=0).fit(data).get_results()
+    tuner = OptunaHyperparameterTuner("CVXPYEstimator", data, cv_folds=2, silent=True, show_progress=False)
+    tuner.optimize(n_trials=2, show_progress=False)
+    tuner.fit_best_model()
+    assert os.listdir(tmp_path) == []
+
+
+def test_the_tuner_log_frequency_only_warns():
+    from haldensity.full_uni import OptunaHyperparameterTuner
+
+    data = pd.DataFrame({"W1": np.random.default_rng(3).beta(2.0, 5.0, size=40)})
+    with pytest.warns(DeprecationWarning, match="estimator_kwargs"):
+        tuner = OptunaHyperparameterTuner("CVXPYEstimator", data, log_frequency=5)
+    assert "log_frequency" not in tuner.estimator_kwargs
+
+
+def test_log_frequency_zero_turns_logging_off_in_first_order_estimators(tmp_path):
+    from haldensity.full_uni.estimators.fista import FISTAEstimator
+
+    data = pd.DataFrame({"W1": np.random.default_rng(4).beta(2.0, 5.0, size=60)})
+    est = FISTAEstimator(lam=1.0, n_iterations=30, basis_order=0, log_dir=str(tmp_path / "f.log"), log_frequency=0)
+    est.fit(data)                                       # 0 divided the iteration counter before 0.2.0
+    assert not est.do_log

@@ -75,7 +75,6 @@ class OptunaHyperparameterTuner:
         random_state: int = 42,
         max_iter: int = 50_000,
         tolerance: float = 1e-6,
-        log_frequency: int = -1,  # No logging during CV
         silent: bool = True,
         show_progress: bool = False,
         param_overrides: Optional[dict[str, Any]] = None,
@@ -101,7 +100,9 @@ class OptunaHyperparameterTuner:
         fitting grid is an estimator option: pass estimator_kwargs={"n_grid_points": ...} and every
         fold and the final fit use it. The 0.1.0 tuner option n_grid_points never reached the
         estimators; it is still accepted through 0.2.x with a DeprecationWarning (removed in 0.3.0)
-        and is now passed on as estimator_kwargs["n_grid_points"].
+        and is now passed on as estimator_kwargs["n_grid_points"]. Logging is an estimator option too
+        (estimator_kwargs={"log_dir": ..., "log_frequency": ...}); the 0.1.0 tuner option log_frequency
+        never reached the estimators and now only warns (removed in 0.3.0).
         
         Args:
             estimator_name: Name of the estimator to tune
@@ -112,7 +113,6 @@ class OptunaHyperparameterTuner:
             random_state: Random seed for reproducibility
             max_iter: Maximum iterations for iterative estimators
             tolerance: Convergence tolerance
-            log_frequency: Logging frequency (-1 = no logging)
             silent: Whether to suppress all print statements
             param_overrides: Optional overrides/limits for hyperparameters. basis_order is fixed at
                 DEFAULT_BASIS_ORDER = 2 unless given here; {"basis_order": [0, 1, 2]} cross-validates
@@ -158,6 +158,13 @@ class OptunaHyperparameterTuner:
                 "OptunaHyperparameterTuner(n_grid_points=...) will be removed in 0.3.0; pass "
                 "estimator_kwargs={'n_grid_points': ...}. It is now passed to every CV fold and to the "
                 "final fit (in 0.1.0 it had no effect).", DeprecationWarning, stacklevel=2)
+        if "log_frequency" in deprecated:
+            # 0.1.0 tuner option that never reached the estimators; logging is an estimator option
+            deprecated.pop("log_frequency")
+            warnings.warn(
+                "OptunaHyperparameterTuner(log_frequency=...) has no effect and will be removed in 0.3.0; to log "
+                "the fits, pass estimator_kwargs={'log_dir': ..., 'log_frequency': ...}.", DeprecationWarning,
+                stacklevel=2)
         take_deprecated("OptunaHyperparameterTuner", deprecated, {})
         if _cv_scoring not in CV_SCORINGS:
             raise ValueError(f"_cv_scoring must be one of {CV_SCORINGS}, got {_cv_scoring!r}")
@@ -170,7 +177,6 @@ class OptunaHyperparameterTuner:
         self.random_state = random_state
         self.max_iter = max_iter
         self.tolerance = tolerance
-        self.log_frequency = log_frequency
         self.silent = silent
         self.show_progress = show_progress
         self.param_overrides: dict[str, Any] = dict(param_overrides or {})
