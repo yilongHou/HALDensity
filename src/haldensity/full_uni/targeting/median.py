@@ -46,6 +46,10 @@ class MedianTargetLearner(BaseTargetLearner):
     whether data points are less than the initial fit's median m. The M-step's
     integration rule has a cell edge at m, so the targeted density satisfies
     F(m) = P_n(X < m) at m itself.
+
+    One targeting step at the initial median, as in the paper's median example (Yilong,
+    2026-10-24: one step is good enough), so the targeted median need not be an empirical
+    median; iterating the step would end at one.
     """
 
     def _initial_median(self, **kwargs) -> float:

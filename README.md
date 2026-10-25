@@ -107,87 +107,71 @@ the peak is 65.2 (the same with 2,000), and a 5-fold CV trial takes 0.84 s inste
 
 Targeted Learning (TMLE)
 
+The targeting step starts from a fitted full-data estimator. `targeting_inputs` takes the fit (or its
+`get_results()`) and returns the M-step's inputs: the intercept, the powers x, ..., x^k and the nonzero knot
+coefficients, with their knots. Build each learner with the fit's `basis_order`. The M-step integrates
+exactly (cells with edges at the knots and the targeting points), so when the targeting coefficients stay
+inside their L1 bound the score equations hold at the targeting points themselves: the TMLE of S(t) is the
+empirical survival at t, the TMLE of the mean is the sample mean. Each result holds `estimate` (the TMLE),
+`plug_in` (the initial fit's value) and `score_residual` (the largest score-equation error).
+
 ```python
-# Common prerequisites (after fitting an estimator)
 import numpy as np
 from haldensity.full_uni.targeting import (
     CDFTargetLearner, SurvivalTargetLearner, MomentsTargetLearner, MedianTargetLearner,
     cdf_estimand_variance, survival_estimand_variance, moments_estimand_variance, median_estimand_variance,
+    targeting_inputs,
 )
 
-results = est.get_results()
-old_theta = np.array(results["theta_hat"])                     # intercept + HAL coefs
-hal_grid = results["grid_points_hal_selected"]                 # selected HAL grid points
+inputs = targeting_inputs(est)            # {"old_theta": ..., "grid_points_hal_selected": ...}
+points = np.array([0.05, 0.07, 0.09])     # targeting points inside the data
 ```
 
-# 1) CDF targeting (estimate F(x) at chosen points)
+# 1) CDF targeting (F(t) at chosen points)
 
 ```python
-import numpy as np
-
-cdf_points = np.linspace(0.02, 0.98, 10)
-learner = CDFTargetLearner(norm_constraint=100, basis_order=0)
-targeted_fit = learner.run_m_step(
-    uncensored_augmented=data,
-    grid_points_hal_selected=hal_grid,
-    old_theta=old_theta,
-    targeting_points=cdf_points,   # required
-)
-# Variance (SE^2) at the same points
-var = cdf_estimand_variance(targeted_fit=targeted_fit, uncensored_data=data, targeting_points=cdf_points)
-se = np.sqrt(var)
+learner = CDFTargetLearner(norm_constraint=100, basis_order=est.basis_order)
+targeted_fit = learner.run_m_step(uncensored_augmented=data, **inputs, targeting_points=points)
+tmle, plug_in = targeted_fit["estimate"], targeted_fit["plug_in"]
+se = np.sqrt(cdf_estimand_variance(targeted_fit=targeted_fit, uncensored_data=data, targeting_points=points))
 ```
 
-# 2) Survival targeting (estimate S(x)=1-F(x) at chosen points)
+# 2) Survival targeting (S(t) = 1 - F(t) at chosen points)
 
 ```python
-surv_points = np.linspace(0.02, 0.98, 10)
-learner = SurvivalTargetLearner(norm_constraint=100, basis_order=0)
-targeted_fit = learner.run_m_step(
-    uncensored_augmented=data,
-    grid_points_hal_selected=hal_grid,
-    old_theta=old_theta,
-    targeting_points=surv_points,  # required
-)
-var = survival_estimand_variance(targeted_fit=targeted_fit, uncensored_data=data, targeting_points=surv_points)
-se = np.sqrt(var)
+learner = SurvivalTargetLearner(norm_constraint=100, basis_order=est.basis_order)
+targeted_fit = learner.run_m_step(uncensored_augmented=data, **inputs, targeting_points=points)
+tmle = targeted_fit["estimate"]
+se = np.sqrt(survival_estimand_variance(targeted_fit=targeted_fit, uncensored_data=data, targeting_points=points))
 ```
 
-# 3) Moments targeting (estimate E[X^k], e.g., k=2)
+# 3) Moments targeting (E[X^r], e.g. the mean)
 
 ```python
-k = 2  # 1 for mean, 2 for second moment, etc.
-learner = MomentsTargetLearner(norm_constraint=100, basis_order=0)
-targeted_fit = learner.run_m_step(
-    uncensored_augmented=data,
-    grid_points_hal_selected=hal_grid,
-    old_theta=old_theta,
-    x_moment=k,                    # required
-)
-var = moments_estimand_variance(targeted_fit=targeted_fit, uncensored_data=data, x_moment=k)
-se = np.sqrt(var)[0]  # single scalar
+r = 1  # 1 for the mean, 2 for the second moment, etc.
+learner = MomentsTargetLearner(norm_constraint=100, basis_order=est.basis_order)
+targeted_fit = learner.run_m_step(uncensored_augmented=data, **inputs, x_moment=r)
+tmle = targeted_fit["estimate"][0]
+se = np.sqrt(moments_estimand_variance(targeted_fit=targeted_fit, uncensored_data=data, x_moment=r))[0]
 ```
 
-# 4) Median targeting (estimate the median)
+# 4) Median targeting
 
 ```python
-learner = MedianTargetLearner(norm_constraint=100, basis_order=0)
-targeted_fit = learner.run_m_step(
-    uncensored_augmented=data,
-    grid_points_hal_selected=hal_grid,
-    old_theta=old_theta,
-    # no extra kwargs required
-)
-var = median_estimand_variance(targeted_fit=targeted_fit, uncensored_data=data)
-se = np.sqrt(var)[0]  # single scalar
+learner = MedianTargetLearner(norm_constraint=100, basis_order=est.basis_order)
+targeted_fit = learner.run_m_step(uncensored_augmented=data, **inputs)
+tmle = targeted_fit["estimate"][0]
+se = np.sqrt(median_estimand_variance(targeted_fit=targeted_fit, uncensored_data=data))[0]
 ```
 
 Notes
 
-- The example notebook `examples/example_full_data_target_learning.ipynb` demonstrates all four targets. Set `TARGET_TYPE` to one of "CDF", "Survival", "Moments", or "Median" to switch modes.
-- For CDF/Survival, provide `targeting_points` where the functional is targeted and where standard errors are reported.
-- For Moments, provide `x_moment` (integer power).
-- For Median, no additional arguments are needed beyond `old_theta` and the selected HAL grid.
+- For CDF/Survival, give `targeting_points` inside the data: beyond the data the empirical value is 0 or 1,
+  which the targeted density can only approach as its coefficients reach the L1 bound.
+- For Moments, give `x_moment` (integer power).
+- For Median, no extra arguments: the learner takes one targeting step at the initial fit's median m, so
+  F(m) = P_n(X < m) holds at m; the targeted median need not be an empirical median.
+- The example notebook `examples/example_full_data_target_learning.ipynb` still uses the pre-0.2.0 API.
 
 Examples
 

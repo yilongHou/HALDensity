@@ -46,6 +46,25 @@ class TargetingResults(BaseModel):
     integration_order: Optional[int] = None
 
 
+def targeting_inputs(fit: Any) -> dict[str, np.ndarray]:
+    """The M-step's inputs from a fitted full-data estimator (or its ``get_results()``).
+
+    Returns {"old_theta": the intercept, the powers x, ..., x^k and the nonzero knot coefficients,
+    "grid_points_hal_selected": those knots}, so that
+    ``learner.run_m_step(uncensored_augmented=data, **targeting_inputs(est), ...)`` works at every order;
+    build the learner with the fit's ``basis_order``. (``get_results()["theta_hat"]`` has one coefficient
+    per candidate knot, zeros included, so it cannot be passed as it is.)
+    """
+    results = fit.get_results() if hasattr(fit, "get_results") else fit
+    theta = np.asarray(results["theta_hat"], dtype=float).ravel()
+    knots = np.asarray(results["data_points"], dtype=float).ravel()
+    first = theta.size - knots.size                      # the intercept and the k powers
+    if first < 1:
+        raise ValueError("theta_hat is shorter than the knots: not the results of a full-data HAL fit")
+    keep = theta[first:] != 0
+    return {"old_theta": np.concatenate([theta[:first], theta[first:][keep]]), "grid_points_hal_selected": knots[keep]}
+
+
 class BaseTargetLearner:
     """Shared M-step logic; subclasses supply the targeting basis, its jump points, the target and its variance."""
 
@@ -202,6 +221,14 @@ class BaseTargetLearner:
         old_theta = np.asarray(old_theta, dtype=float).ravel()
         hal_knots = np.asarray(grid_points_hal_selected, dtype=float).ravel()
         k = self.basis_order
+        expected = (1 if k == 0 else k + 1) + hal_knots.size
+        if old_theta.size != expected:
+            raise ValueError(
+                f"old_theta has {old_theta.size} entries, but an order-{k} fit with {hal_knots.size} selected knots "
+                f"needs {expected}: the intercept, {k if k >= 1 else 'no'} powers and one coefficient per selected "
+                f"knot. Build both from the fit with haldensity.full_uni.targeting.targeting_inputs(estimator) "
+                f"(get_results()['theta_hat'] also holds the zero coefficients), and give the learner the fit's "
+                f"basis_order.")
         # Backward-compat: some learners (e.g., Median) expect underscored keys
         kwargs = {**kwargs, '_old_theta': old_theta, '_grid_points_hal_selected': hal_knots}
 

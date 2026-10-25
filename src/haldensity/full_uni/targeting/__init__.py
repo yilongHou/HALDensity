@@ -1,6 +1,6 @@
 """Targeted learning for univariate full data: re-fit with added targeting basis functions."""
 
-from haldensity.full_uni.targeting.base import BaseTargetLearner, TargetingResults
+from haldensity.full_uni.targeting.base import BaseTargetLearner, TargetingResults, targeting_inputs
 from haldensity.full_uni.targeting.cdf import (
     CDFTargetLearner,
     cdf_estimand_variance,
@@ -25,6 +25,7 @@ from haldensity.full_uni.targeting.survival import (
 __all__ = [
     "BaseTargetLearner",
     "TargetingResults",
+    "targeting_inputs",
     "CDFTargetLearner",
     "cdf_estimand_variance",
     "cdf_targeting_M_step",

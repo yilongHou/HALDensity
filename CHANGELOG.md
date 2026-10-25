@@ -313,6 +313,14 @@ The old behaviour of these fixes is available at `v0.1.0`.
 
 - `np.trapz` (removed in NumPy 2.4) replaced in the variance module; delta-method bands crashed
   on current NumPy.
+- The README's targeting example failed at order k >= 1 with a shape error: `get_results()["theta_hat"]`
+  holds a coefficient for every candidate knot, zeros included, while the M-step expects the intercept, the
+  powers and the nonzero knot coefficients with their knots (Yilong, 2026-10-24; full data). New
+  `haldensity.full_uni.targeting.targeting_inputs(fit)` builds those inputs from a fitted estimator or its
+  results; `run_m_step` raises an error that names it when `old_theta` does not match the knots and the order;
+  the README's targeting section uses it (targeting points inside the data, the exact `estimate` and
+  `plug_in`), and a test runs the README's snippets at k = 0, 1 and 2. The median learner's docstring states
+  that it takes one targeting step at the initial median, as in the paper.
 
 ### Removed
 
