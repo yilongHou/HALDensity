@@ -176,6 +176,8 @@ Examples
 
 Tutorials per data type, in `examples/tutorials/`. They use the public API and run in CI:
 
+- `full_uni/01_galaxies.ipynb`: the galaxy velocities (Roeder 1990): a larger fitting grid for data that
+  occupy a small part of [0, 1], cross-validation, pointwise 95% intervals
 - `full_uni/02_simulated_density.ipynb`: the HAL-MLE on simulated data, with the L1 bound chosen by
   cross-validation, compared with the truth; the fit's diagnostics
 - `full_uni/03_targeting.ipynb`: targeted estimates (TMLE) of survival, the mean and the median, with
@@ -186,7 +188,6 @@ Tutorials per data type, in `examples/tutorials/`. They use the public API and r
 
 The notebooks directly in `examples/` predate 0.2.0 and use its old import paths:
 
-- `examples/example_full_data_case_study.ipynb`: real-data galaxy velocity case study
 - `examples/example_interval_censored_density_estimator.ipynb`: interval-censored density estimation workflow
 
 Repository Structure

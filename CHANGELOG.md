@@ -225,8 +225,8 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
 - `OptunaHyperparameterTuner(estimator_kwargs=...)` and `best_estimator_params`.
 - CI: the test suite on Python 3.11 for pushes and pull requests.
 - Tutorials per data type in `examples/tutorials/`, using the public API only (Yilong, 2026-10-24):
-  `full_uni/02_simulated_density`, `full_uni/03_targeting`, `full_multi/01_bivariate` and
-  `rc/01_point_estimators`. CI runs them with nbmake (`pytest --nbmake examples/tutorials`, without MOSEK;
+  `full_uni/01_galaxies`, `full_uni/02_simulated_density`, `full_uni/03_targeting`, `full_multi/01_bivariate`
+  and `rc/01_point_estimators`. CI runs them with nbmake (`pytest --nbmake examples/tutorials`, without MOSEK;
   nbmake joins the `dev` extra). The saved outputs come from a run with MOSEK.
 - From the consolidated development branch: right-censored observed-data L1-MLE, its CV tuner
   and fit object; right-censored targeting (survival, mean, density L2, RMST, entropy) and EIF
@@ -383,7 +383,9 @@ The old behaviour of these fixes is available at `v0.1.0`.
   the midpoint initial fit followed by direct optimization (FISTA, projected gradient).
 - Example notebooks replaced by the tutorials (still in git history): `example_full_data_density_estimator.ipynb`
   and `example_full_data_target_learning.ipynb` (both in `v0.1.0`), `example_multivariate_full_data_api.ipynb`
-  and `example_right_censored_fit_object.ipynb`.
+  and `example_right_censored_fit_object.ipynb`; `example_full_data_case_study.ipynb` (in `v0.1.0`; its copy
+  with the bootstrap is in the paper repository HAL-MLE-DE-AOS, `from_haldensity/examples/`) and
+  `examples/plotting.py` (in `v0.1.0`; each tutorial draws its own plots).
 - Right-censored comparison helpers (truth objects, error metrics, M1–M4 experiment runner,
   two simulators) and the plug-in pipelines `fit_right_censored_cv_ipcw_l1mle_plugin` /
   `..._undersmoothed_plugin`; moved to the HAL_TMLE_RC project repository and replaced by
