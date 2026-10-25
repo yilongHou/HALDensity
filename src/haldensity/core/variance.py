@@ -1,13 +1,18 @@
 """Delta-method variance of the full-data HAL density and pointwise confidence intervals.
 
-Basis cleaning (on by default): the SE is computed on the basis of an accurate, certified solution
+Basis cleaning (on by default): the SE is computed on the cleaned basis of an accurate solution
 (:mod:`haldensity.core.univariate.support`) instead of a loosely solved fit's pruned basis.
-``support_refit="auto"`` (default): a ``CVXPYEstimator`` fit (its tight final solve, the default)
-(its default) already is that solution, and its own basis is used, so the point estimate and the
-SE share one solve; for other results that carry the fit's L1 bound (e.g. ``solver_tolerance=
-"default"``) the problem is re-solved tightly once per fit, cached and reused in
-:func:`density_confidence_interval`, and the point estimate stays the original fit.
-``support_refit=None`` uses the original basis; a :class:`SupportRefit` can also be passed.
+``support_refit="auto"`` (default): a ``CVXPYEstimator`` fit made with its tight final solve (the
+default) already is that solution, and its own basis is used, so the point estimate and the SE share
+one solve; for other results that carry the fit's L1 bound (e.g. ``_solver_tolerance="default"``) the
+problem is re-solved tightly once per fit, cached and reused in :func:`density_confidence_interval`,
+and the point estimate stays the original fit. ``support_refit=None`` uses the original basis; a
+:class:`SupportRefit` can also be passed.
+
+The band's centre (the density), its normalizing constant and E[phi] in the scores use the rule of the
+accurate normalizer (Gauss-Legendre with breakpoints at the selected knots, exact for k = 0;
+:func:`haldensity.core.univariate.normalizer.quadrature_rule`), so the centre is the density that
+``get_density_at_points`` reports. Before 0.2.0 they used a 200-point trapezoid on [0, 1].
 """
 
 from collections import OrderedDict
@@ -15,12 +20,12 @@ from typing import Optional, Union
 
 import numpy as np
 import pandas as pd
-from scipy.integrate import trapezoid
 from scipy.stats import norm
 import warnings
 
 from haldensity.core.basis.univariate import create_basis_functions
 from haldensity.core.options import take_deprecated
+from haldensity.core.univariate.normalizer import log_unnormalized_density, quadrature_rule
 from haldensity.core.univariate.support import SupportRefit, refit_support
 
 SupportRefitArg = Union[SupportRefit, None, str]
@@ -137,50 +142,12 @@ def estimate_covariance_beta(
         covariance = np.full((size, size), np.nan).view(BasisCovariance)
         covariance.support_refit = support_refit
         return covariance
-    original_data_points = np.array(estimation_results['data_points'])
-    grid_points_hal_original = np.unique(original_data_points)
-
-    theta_selected_ind = np.concatenate([
-        np.arange(0, basis_order + 1),
-        theta_hat_full[basis_order + 1:].nonzero()[0] + basis_order + 1,
-    ])
-    theta_hat = theta_hat_full[theta_selected_ind]
-
+    knots = np.unique(np.array(estimation_results['data_points']))
     n_samples = len(data)
 
-    basis_matrix, _ = create_basis_functions(
-        data,
-        grid_points_hal_original,
-        order=basis_order,
-        include_intercept=True,
-    )
-    basis_matrix_selected = basis_matrix[:, theta_selected_ind]
-
-    n_grid_points = len(estimation_results.get('grid_points', np.linspace(0, 1, 200)))
-    integration_grid = np.linspace(0, 1, n_grid_points)
-    integration_df = pd.DataFrame({'W1': integration_grid})
-
-    phi_integration, _ = create_basis_functions(
-        integration_df,
-        grid_points_hal_original,
-        order=basis_order,
-        include_intercept=True,
-    )
-    phi_integration_selected = phi_integration[:, theta_selected_ind]
-
-    log_density_integration = phi_integration_selected @ theta_hat
-    max_log_density = np.max(log_density_integration)
-    density_unnorm = np.exp(log_density_integration - max_log_density)
-
-    dx = integration_grid[1] - integration_grid[0]
-    normalizing_constant = trapezoid(density_unnorm, dx=dx)
-    density_integration = density_unnorm / normalizing_constant
-
-    expected_phi = trapezoid(
-        phi_integration_selected * density_integration[:, np.newaxis],
-        dx=dx,
-        axis=0,
-    )
+    selected_knots = _selected_knots(theta_hat_full, knots, basis_order)
+    _, expected_phi = _fitted_expectation(theta_hat_full, knots, basis_order)
+    basis_matrix_selected = _basis(data, selected_knots, basis_order)
 
     scores = basis_matrix_selected - expected_phi[np.newaxis, :]
     observed_information = (scores.T @ scores) / n_samples
@@ -199,54 +166,42 @@ def estimate_covariance_beta(
     return covariance
 
 
+def _selected_knots(theta_hat_full: np.ndarray, knots: np.ndarray, basis_order: int) -> np.ndarray:
+    return knots[np.asarray(theta_hat_full)[basis_order + 1:] != 0]
+
+
+def _basis(x: Union[pd.DataFrame, np.ndarray], knots: np.ndarray, basis_order: int) -> np.ndarray:
+    """The basis at ``x`` restricted to the intercept, the powers and the given knots (float64)."""
+    frame = x if isinstance(x, pd.DataFrame) else pd.DataFrame({'W1': np.asarray(x, dtype=float)})
+    return create_basis_functions(frame, knots, order=basis_order, include_intercept=True)[0]
+
+
+def _fitted_expectation(theta_hat_full: np.ndarray, knots: np.ndarray, basis_order: int) -> tuple[float, np.ndarray]:
+    """log Z and E[phi] over the selected basis under the fitted density, with the rule of the accurate
+    normalizer (Gauss-Legendre with breakpoints at the selected knots; exact for k = 0)."""
+    points, weights, result = quadrature_rule(theta_hat_full, knots, basis_order)
+    mass = weights * np.exp(log_unnormalized_density(points, theta_hat_full, knots, basis_order) - result.log_z)
+    phi = _basis(points, _selected_knots(theta_hat_full, knots, basis_order), basis_order)
+    return result.log_z, mass @ phi
+
+
 def _evaluation_pieces(
     x_values: np.ndarray,
     theta_hat_full: np.ndarray,
     knots: np.ndarray,
     basis_order: int,
-    n_grid_points: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """(selected theta, basis at x on the selection, density at x, E[phi]) for one coefficient vector."""
+    """(selected theta, basis at x on the selection, density at x, E[phi]) for one coefficient vector; the
+    density is normalized with the accurate normalizer, as ``get_density_at_points`` does."""
     theta_selected_ind = np.concatenate([
         np.arange(0, basis_order + 1),
         theta_hat_full[basis_order + 1:].nonzero()[0] + basis_order + 1,
     ])
     theta_hat = theta_hat_full[theta_selected_ind]
-
-    phi_eval, _ = create_basis_functions(
-        pd.DataFrame({'W1': x_values}),
-        knots,
-        order=basis_order,
-        include_intercept=True,
-    )
-    phi_eval_selected = phi_eval[:, theta_selected_ind]
-
-    integration_grid = np.linspace(0, 1, n_grid_points)
-    phi_integration, _ = create_basis_functions(
-        pd.DataFrame({'W1': integration_grid}),
-        knots,
-        order=basis_order,
-        include_intercept=True,
-    )
-    phi_integration_selected = phi_integration[:, theta_selected_ind]
-
-    log_density_integration = phi_integration_selected @ theta_hat
-    max_log_density = np.max(log_density_integration)
-    density_unnorm = np.exp(log_density_integration - max_log_density)
-
-    dx = integration_grid[1] - integration_grid[0]
-    normalizing_constant = trapezoid(density_unnorm, dx=dx)
-    density_integration = density_unnorm / normalizing_constant
-
-    log_density_eval = phi_eval_selected @ theta_hat
-    log_Z = np.log(normalizing_constant) + max_log_density
-    density_eval = np.exp(log_density_eval - log_Z)
-
-    expected_phi = trapezoid(
-        phi_integration_selected * density_integration[:, np.newaxis],
-        dx=dx,
-        axis=0,
-    )
+    log_z, expected_phi = _fitted_expectation(theta_hat_full, knots, basis_order)
+    phi_eval_selected = _basis(x_values, _selected_knots(theta_hat_full, knots, basis_order), basis_order)
+    log_density = log_unnormalized_density(x_values, theta_hat_full, knots, basis_order) - log_z
+    density_eval = np.exp(np.clip(log_density, -745.0, 709.0))
     return theta_hat, phi_eval_selected, density_eval, expected_phi
 
 
@@ -285,18 +240,17 @@ def density_confidence_interval(
             else:
                 support_refit = None
     knots = np.unique(np.array(estimation_results['data_points']))
-    n_grid_points = len(estimation_results.get('grid_points', np.linspace(0, 1, 200)))
     x_values = np.clip(x_values, 0, 1)
     if _cleaning_failed(support_refit):
         warnings.warn(NO_SE_WARNING, UserWarning, stacklevel=2)
-        density_eval = _evaluation_pieces(x_values, original_theta, knots, basis_order, n_grid_points)[2]
+        density_eval = _evaluation_pieces(x_values, original_theta, knots, basis_order)[2]
         nan = np.full(len(x_values), np.nan)
         result_df = pd.DataFrame({'x': x_values, 'density': density_eval, 'se': nan, 'lower': nan, 'upper': nan})
         result_df.attrs.update(basis='cleaned', basis_certified=False, se='none: basis cleaning failed')
         return result_df
 
     theta_hat, phi_eval_selected, density_se_basis, expected_phi = _evaluation_pieces(
-        x_values, _theta_for_se(estimation_results, support_refit), knots, basis_order, n_grid_points
+        x_values, _theta_for_se(estimation_results, support_refit), knots, basis_order
     )
     if cov_beta.shape != (theta_hat.size, theta_hat.size):
         raise ValueError(
@@ -307,7 +261,7 @@ def density_confidence_interval(
         density_eval = density_se_basis
     else:
         # the point estimate stays the original fit; only the SE uses the cleaned basis
-        density_eval = _evaluation_pieces(x_values, original_theta, knots, basis_order, n_grid_points)[2]
+        density_eval = _evaluation_pieces(x_values, original_theta, knots, basis_order)[2]
 
     n_eval = len(x_values)
     standard_errors = np.zeros(n_eval)

@@ -214,9 +214,20 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   2.9e-4, along a poorly determined direction); the multivariate k = 1 density by 5e-4 relative (coefficients
   by up to 13%: 1,004 columns and 512 normalizer points do not determine them); every k = 0 fit is identical
   (its basis is 0/1). Memory: a design matrix on its own doubles (n = 10,000 with every knot: 400 to 800 MB;
-  multivariate d = 2, k = 1, n = 2,000: 80 to 160 MB), but whole fits do not grow, because CVXPY keeps its
+  multivariate d = 2, k = 1, n = 2,000: 80 to 160 MB), but whole fits grow little, because CVXPY keeps its
   own float64 copy: peak memory of an IPCW right-censored fit at n = 3,200 466 vs 464 MB, interval-censored
-  n = 1,600 338 vs 345 MB, multivariate d = 2, n = 500 1,395 vs 1,348 MB; times unchanged.
+  n = 1,600 338 vs 345 MB, multivariate d = 2 at n = 500 1,395 vs 1,348 MB and at n = 1,000 (k = 0, the
+  largest case measured) 2,377 vs 2,695 MB (+13%); times unchanged (188 vs 196 s for the largest).
+- **The delta-method band's centre and the SE use the accurate normalizer** (Yilong, 2026-10-24; core):
+  `estimate_covariance_beta` and `density_confidence_interval` computed the normalizing constant and E[phi]
+  (the centring of the scores) with a 200-point trapezoid on [0, 1]. They now use the rule of the accurate
+  normalizer (Gauss-Legendre with breakpoints at the selected knots, exact for k = 0;
+  `haldensity.core.univariate.normalizer.quadrature_rule`), so the band's centre is the density that
+  `get_density_at_points` reports, to the last digit (before: up to 5.1% below it on Galaxies, whose data
+  occupy 8% of [0, 1], and 1.2% off for a k = 0 fit of simulated data). Before/after on the same five fixed
+  fits (MOSEK): on Galaxies (k = 2, M = 596,793) the centre rises by 5.4% and the SE by 4-12% (ridge 1e-6)
+  or 4-15% (ridge 1e-10); for the k = 0 fit (n = 400) both rise by 1.2%; for the k = 1 and 2 fits of simulated
+  data the centre moves by less than 6e-5 and the SE by less than 8e-4 relative. Fits are unchanged.
 - Full-data CV can apply the conservative adjustment (core, shared with the censored-data tuners
   through `haldensity.core.cv.conservative`): after the search, the smallest bound whose mean CV
   log-likelihood is within 5% of a fold SD of the best, found by bracketing and bisection in log M.

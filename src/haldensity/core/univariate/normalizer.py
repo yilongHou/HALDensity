@@ -14,7 +14,8 @@ is computed cell by cell with breakpoints at those knots: Gauss-Legendre with
 exact.
 
 The fitting objectives keep their own (midpoint-rule) normalizers; this module
-only evaluates a fitted density.
+only evaluates a fitted density and, through :func:`quadrature_rule`,
+expectations under it (the delta-method SE in :mod:`haldensity.core.variance`).
 """
 
 from __future__ import annotations
@@ -138,3 +139,31 @@ def log_normalizer(
         q, previous = 2 * q, refined
     return LogNormalizer(log_z=refined, order=2 * q, change=float(change), converged=bool(change <= tol),
                          n_cells=n_cells)
+
+
+def quadrature_rule(
+    theta: np.ndarray,
+    knots: np.ndarray,
+    basis_order: int,
+    support: tuple[float, float] = SUPPORT,
+    *,
+    order: int = DEFAULT_ORDER,
+    tol: float = DEFAULT_TOL,
+    max_order: int = DEFAULT_MAX_ORDER,
+) -> tuple[np.ndarray, np.ndarray, LogNormalizer]:
+    """Points, weights and log normalizer of the rule behind :func:`log_normalizer`.
+
+    The same cells (breakpoints at the knots with nonzero coefficients) and, for k >= 1, the number of
+    Gauss-Legendre nodes per cell at which log Z converged; for k = 0 one point per cell, exact. On each cell
+    ``exp(f)`` times any basis function with its knot at a breakpoint is smooth, so expectations under the
+    fitted density are ``sum_q w_q exp(f(x_q) - log Z) g(x_q)``.
+    """
+    theta = np.asarray(theta, dtype=float).ravel()
+    knots = np.asarray(knots, dtype=float).ravel()
+    result = log_normalizer(theta, knots, basis_order, support, order=order, tol=tol, max_order=max_order)
+    edges = _breakpoints(_active_knots(theta, knots, basis_order)[0], support)
+    if int(basis_order) == 0:
+        return (edges[:-1] + edges[1:]) / 2, np.diff(edges), result
+    nodes, weights = leggauss(result.order)
+    a, b = edges[:-1, None], edges[1:, None]
+    return ((a + b) / 2 + (b - a) / 2 * nodes).ravel(), ((b - a) / 2 * weights).ravel(), result
