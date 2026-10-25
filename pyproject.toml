@@ -42,7 +42,7 @@ cvx = ["cvxpy>=1.7", "ecos>=2.0.12", "scs>=3.2", "clarabel>=0.9"]
 tuning = ["optuna>=4.4"]
 # Turnbull NPMLE knot placement for interval-censored data (knot_strategy="turnbull")
 turnbull = ["lifelines>=0.30.1"]
-dev = ["ruff>=0.6", "pytest>=7.4", "mypy>=1.7", "build>=1.2", "twine>=5.0"]
+dev = ["ruff>=0.6", "pytest>=7.4", "mypy>=1.7", "build>=1.2", "twine>=5.0", "nbmake>=1.5"]
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

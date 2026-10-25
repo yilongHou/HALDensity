@@ -171,15 +171,21 @@ Notes
 - For Moments, give `x_moment` (integer power).
 - For Median, no extra arguments: the learner takes one targeting step at the initial fit's median m, so
   F(m) = P_n(X < m) holds at m; the targeted median need not be an empirical median.
-- The example notebook `examples/example_full_data_target_learning.ipynb` still uses the pre-0.2.0 API.
 
 Examples
 
-The examples are being reorganized into small tutorials per data type that run with the public API;
-until then some notebooks below still use pre-0.2.0 import paths.
+Tutorials per data type, in `examples/tutorials/`. They use the public API and run in CI:
 
-- `examples/example_full_data_density_estimator.ipynb`: quick demo of estimators on fully observed data
-- `examples/example_full_data_target_learning.ipynb`: targeting examples (TMLE for CDF, survival, moments, median)
+- `full_uni/02_simulated_density.ipynb`: the HAL-MLE on simulated data, with the L1 bound chosen by
+  cross-validation, compared with the truth; the fit's diagnostics
+- `full_uni/03_targeting.ipynb`: targeted estimates (TMLE) of survival, the mean and the median, with
+  influence-curve standard errors
+- `full_multi/01_bivariate.ipynb`: the multivariate estimator (experimental) on a bivariate sample
+- `rc/01_point_estimators.ipynb`: right-censored data: the four HAL point estimators and the fitted
+  distribution
+
+The notebooks directly in `examples/` predate 0.2.0 and use its old import paths:
+
 - `examples/example_full_data_case_study.ipynb`: real-data galaxy velocity case study
 - `examples/example_interval_censored_density_estimator.ipynb`: interval-censored density estimation workflow
 
@@ -195,7 +201,7 @@ src/haldensity/
   ic/           # interval-censored: estimators, tuners; current_status/
   datasets/     # sample data (galaxies) and simple simulators
 docs/           # censored-data overview; dev/ (layout, decisions, experiment write-ups)
-examples/       # notebooks
+examples/       # tutorials/ per data type (run in CI); older notebooks
 ```
 
 See `CONTRIBUTING.md` for the development workflow and `CHANGELOG.md` for changes.
