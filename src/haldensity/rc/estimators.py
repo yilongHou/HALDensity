@@ -18,6 +18,7 @@ from haldensity.core.univariate.base_estimator import BaseEstimator
 from haldensity.core.defaults import EMStageResult, EM_DEFAULTS
 from haldensity.core.univariate.weighted_mle import WeightedHALMLEEstimator
 from haldensity.rc.fit import RightCensoredHALFit, last_failure_from_frame
+from haldensity.rc.km import last_time_as_event
 
 
 logger = logging.getLogger(__name__)
@@ -71,7 +72,8 @@ class RightCensoredInitEstimator(WeightedHALMLEEstimator):
 
     Examples
     --------
-    >>> from haldensity.rc import KaplanMeier, compute_ipcw_weights
+    >>> from haldensity.rc import KaplanMeier, compute_ipcw_weights, last_time_as_event
+    >>> data = last_time_as_event(data)          # the largest time counts as an event
     >>> km = KaplanMeier().fit(data)
     >>> weights = compute_ipcw_weights(data["T"], data["Delta"], km.predict)
     >>> uncensored = data[data["Delta"] == 1]
@@ -329,6 +331,7 @@ class RightCensoredEMStage:
         """
         if "T" not in data.columns or "Delta" not in data.columns:
             raise ValueError("data must contain columns 'T' and 'Delta'")
+        data = last_time_as_event(data)
 
         # Import here to avoid circular imports
         from haldensity.rc.metrics import incomplete_loglik
@@ -616,6 +619,7 @@ class RightCensoredEMEstimator(BaseEstimator):
         """
         if "T" not in data.columns or "Delta" not in data.columns:
             raise ValueError("data must contain columns 'T' and 'Delta'")
+        data = last_time_as_event(data)
 
         if self.verbose:
             logger.info("Initializing IPCW-HAL-MLE...")

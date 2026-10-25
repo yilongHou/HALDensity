@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 
 from haldensity.core.univariate.fit import HALFit, _as_1d
+from haldensity.rc.km import _last_time_as_event
 
 
 def last_failure_from_frame(
@@ -22,10 +23,10 @@ def last_failure_from_frame(
     delta_col: str = "Delta",
     fallback_col: str = "W1",
 ) -> Optional[float]:
-    """Return the last observed failure time, if any."""
+    """Return the last observed failure time, if any (the largest time counts as one, the Kaplan-Meier convention)."""
     if time_col in data.columns and delta_col in data.columns:
         times = np.asarray(data[time_col].values, dtype=float).ravel()
-        delta = np.asarray(data[delta_col].values, dtype=int).ravel()
+        delta = _last_time_as_event(times, data[delta_col].values)
         events = times[delta == 1]
         if events.size:
             return float(np.max(events))

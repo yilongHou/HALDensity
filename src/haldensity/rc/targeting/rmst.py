@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from haldensity.rc.estimators import RightCensoredInitEstimator
-from haldensity.rc.km import KaplanMeier
+from haldensity.rc.km import KaplanMeier, last_time_as_event
 from haldensity.rc.targeting.eic import (
     _compute_exact_rmst_eif,
     _estimate_positivity_filtered_eic_variance,
@@ -725,6 +725,7 @@ class RightCensoredRMSTTargetLearner:
         missing = required_cols.difference(observed_data.columns)
         if missing:
             raise ValueError(f"observed_data is missing required columns: {sorted(missing)}")
+        observed_data = last_time_as_event(observed_data)
 
         tau_grid = _normalize_tau_points(targeting_points)
         if km is None:

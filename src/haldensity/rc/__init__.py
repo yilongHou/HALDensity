@@ -3,7 +3,7 @@
 Targeting lives in ``haldensity.rc.targeting``.
 """
 
-from haldensity.rc.km import KaplanMeier
+from haldensity.rc.km import KaplanMeier, last_time_as_event
 from haldensity.rc.weights import compute_ipcw_weights
 from haldensity.rc.estimators import (
     RightCensoredEMEstimator,
@@ -46,6 +46,7 @@ from haldensity.rc.pipelines import (
 
 __all__ = [
     "KaplanMeier",
+    "last_time_as_event",
     "compute_ipcw_weights",
     "RightCensoredEMEstimator",
     "RightCensoredEMStage",

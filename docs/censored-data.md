@@ -6,7 +6,9 @@ fixed in advance.
 ## Right-censored data (`haldensity.rc`)
 
 The observed data are `T` (the smaller of the event time and the censoring time) and `Delta` (1 if the event
-was observed).
+was observed). When the largest observed time is censored, it is treated as an event (the Kaplan–Meier
+convention): every right-censored estimator applies it to its data (`last_time_as_event`), so the
+estimate of the censoring survival stays positive at every observed time.
 
 **Point estimators, one call each.** `fit_right_censored(data, targeting_points, method=...)` returns the
 fitted density, its survival at the requested points and the frozen fits. All four methods share Stage 1, an

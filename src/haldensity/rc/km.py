@@ -1,6 +1,11 @@
 """Kaplan-Meier estimator for right-censoring survival.
 
 Estimates the censoring survival function S_C(t) = P(C > t) for right-censored data.
+
+Kaplan-Meier convention (Yilong, 2026-10-24): when the largest observed time is censored, it is treated
+as an event. ``last_time_as_event`` applies it to a data set; the right-censored estimators, tuners,
+pipelines, targeting steps and AIPW apply it to the data they fit, and ``KaplanMeier.fit`` to the data
+it is fitted on, so the censoring survival estimate stays positive at every observed time.
 """
 
 from __future__ import annotations
@@ -10,6 +15,32 @@ import numpy as np
 import pandas as pd
 
 
+def _last_time_as_event(times: np.ndarray, delta: np.ndarray) -> np.ndarray:
+    """Event indicators with every observation at the largest time counted as an event (a copy)."""
+    times = np.asarray(times, dtype=float).ravel()
+    out = np.asarray(delta, dtype=int).ravel().copy()
+    if times.size and times.shape == out.shape:
+        out[times == times.max()] = 1
+    return out
+
+
+def last_time_as_event(data: pd.DataFrame, time_col: str = "T", delta_col: str = "Delta") -> pd.DataFrame:
+    """Apply the Kaplan-Meier convention: when the largest observed time is censored, treat it as an event.
+
+    Returns ``data`` itself when its largest time is already an event, otherwise a copy with
+    ``delta_col`` set to 1 at that time. Applying it twice changes nothing.
+    """
+    if data.empty or time_col not in data.columns or delta_col not in data.columns:
+        return data
+    current = data[delta_col].to_numpy()
+    adjusted = _last_time_as_event(data[time_col].to_numpy(), current)
+    if np.array_equal(adjusted, np.asarray(current, dtype=int)):
+        return data
+    out = data.copy()
+    out[delta_col] = adjusted.astype(current.dtype, copy=False)
+    return out
+
+
 class KaplanMeier:
     """Kaplan-Meier estimator for censoring survival S_C(t) on [0, 1].
 
@@ -17,7 +48,9 @@ class KaplanMeier:
     - T = min(T*, C) is the observed time
     - Delta = I(T* <= C) is the event indicator (1 = uncensored)
 
-    We treat censoring events as (1 - Delta) to estimate S_C(t).
+    We treat censoring events as (1 - Delta) to estimate S_C(t), with the largest observed time
+    counted as an event (the Kaplan-Meier convention, ``last_time_as_event``), so S_C stays positive
+    at every observed time.
 
     Examples
     --------
@@ -63,8 +96,8 @@ class KaplanMeier:
         if y.size == 0:
             raise ValueError("Empty data")
 
-        # Censoring events: 1 - Delta (we're estimating survival of C, not T)
-        cens_event = 1 - delta
+        # Censoring events: 1 - Delta (we're estimating survival of C, not T); the largest time is an event
+        cens_event = 1 - _last_time_as_event(y, delta)
 
         # Sort by time
         order = np.argsort(y)

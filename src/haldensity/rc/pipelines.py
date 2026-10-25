@@ -38,7 +38,7 @@ import numpy as np
 import pandas as pd
 
 from haldensity.rc.fit import RightCensoredHALFit
-from haldensity.rc.km import KaplanMeier
+from haldensity.rc.km import KaplanMeier, last_time_as_event
 from haldensity.rc.metrics import incomplete_loglik
 from haldensity.rc.observed_mle import RightCensoredObservedL1MLE
 from haldensity.rc.targeting.survival import right_censored_survival_targeting_M_step_v2
@@ -314,6 +314,7 @@ def fit_right_censored(
     if fixed:
         raise ValueError(f"l1_kwargs must not set arguments fixed by the method: {', '.join(fixed)}")
 
+    observed_data = last_time_as_event(observed_data)
     stage1, stage1_result, stage1_seconds = _fit_stage1(
         observed_data,
         cv_folds=cv_folds,

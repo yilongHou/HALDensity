@@ -21,6 +21,7 @@ import pandas as pd
 
 from haldensity.core.univariate.base_estimator import BaseEstimator
 from haldensity.core.basis.univariate import create_basis_functions
+from haldensity.rc.km import last_time_as_event
 from haldensity.rc.fit import RightCensoredHALFit, last_failure_from_frame
 
 
@@ -317,6 +318,7 @@ class _RightCensoredObservedBase(BaseEstimator):
         grid_points_override: Optional[np.ndarray],
     ) -> tuple[np.ndarray, int]:
         self._rc_fit = None
+        data = last_time_as_event(data, time_col=time_col, delta_col=delta_col)
         self._last_failure = last_failure_from_frame(
             data, time_col=time_col, delta_col=delta_col
         )

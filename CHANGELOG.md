@@ -323,6 +323,20 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
 - `MultvarHAL` warns when fitted on one-dimensional data.
 - `lifelines` is an optional extra: `pip install "haldensity[turnbull]"` (only
   `knot_strategy="turnbull"` uses it).
+- **Right-censored data: the largest observed time counts as an event when it is censored** (the
+  Kaplan–Meier convention; Yilong, 2026-10-24; rc). `KaplanMeier.fit` applies it to the data it is fitted
+  on, so the censoring survival estimate stays positive at every observed time; before, it fell to 0 at a
+  censored largest time. The IPCW-HAL fit, the observed-data estimators, the EM estimators, every
+  right-censored tuner (the sample, and each CV training fold as a fit on that fold would), the pipelines,
+  the five targeting steps and AIPW apply it to their data, so the IPCW weights, the likelihoods and the
+  influence curves count that observation as an event; held-out losses use the validation data as given.
+  New `haldensity.rc.last_time_as_event(data)` applies it (use it before calling `compute_ipcw_weights`
+  directly). Why: when the largest time was censored (about 10% of samples in the tutorials' design,
+  Beta(2.2, 2.5) event times with Uniform[0, 1.2] censoring, at n = 200 to 1,000), the influence curves of
+  the mean, RMST, entropy and density L2 blew up (down to −2,595 for the mean on the rc/02 tutorial's
+  sample), and their default standard errors either used those values (density L2: 2.76 for an estimate of
+  1.18) or left out every censored observation (mean, RMST, entropy). **Results change** for such samples,
+  and slightly for others through CV training folds whose largest time is censored.
 
 The old behaviour of these fixes is available at `v0.1.0`.
 

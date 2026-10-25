@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 
 from haldensity.rc.estimators import RightCensoredInitEstimator
-from haldensity.rc.km import KaplanMeier
+from haldensity.rc.km import KaplanMeier, last_time_as_event
 from haldensity.rc.targeting._common import (
     RCCensoringCache,
     RCInitialFit,
@@ -207,6 +207,7 @@ class RightCensoredSurvivalAIPWLearner:
         missing = required_cols.difference(observed_data.columns)
         if missing:
             raise ValueError(f"observed_data is missing required columns: {sorted(missing)}")
+        observed_data = last_time_as_event(observed_data)
 
         targeting_points_arr = _normalize_targeting_points(targeting_points)
         if km is None:

@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from haldensity.rc.estimators import RightCensoredInitEstimator
-from haldensity.rc.km import KaplanMeier
+from haldensity.rc.km import KaplanMeier, last_time_as_event
 from haldensity.rc.targeting.eic import (
     _build_clipped_wald_interval_allow_nan,
     _compute_exact_mean_eif,
@@ -635,6 +635,7 @@ class RightCensoredMeanTargetLearner:
         if mode not in {"auto", "one_step", "iterative"}:
             raise ValueError("mode must be one of {'auto', 'one_step', 'iterative'}.")
         _validate_observed_data(observed_data)
+        observed_data = last_time_as_event(observed_data)
         if km is None:
             km = KaplanMeier().fit(observed_data, time_col="T", delta_col="Delta")
 

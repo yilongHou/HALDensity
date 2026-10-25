@@ -23,7 +23,7 @@ from haldensity.rc.observed_mle import (
     RightCensoredObservedFPGDEstimator,
     RightCensoredObservedL1MLE,
 )
-from haldensity.rc.km import KaplanMeier
+from haldensity.rc.km import KaplanMeier, last_time_as_event
 from haldensity.rc.weights import compute_ipcw_weights
 from haldensity.rc.metrics import incomplete_loglik, ipcw_loglik
 
@@ -112,7 +112,7 @@ class RightCensoredInitTuner(BaseCensoredInitTuner):
         clip: float = 1e-6,
     ):
         super().__init__(
-            data=data,
+            data=last_time_as_event(data),
             cv_folds=cv_folds,
             random_state=random_state,
             n_grid_points=n_grid_points,
@@ -180,6 +180,7 @@ class RightCensoredInitTuner(BaseCensoredInitTuner):
         params: Dict[str, Any]
     ) -> float:
         """Evaluate parameters on a single CV fold."""
+        train_df = last_time_as_event(train_df)  # as a fit on this fold would
         # Fit KM on training data
         km = KaplanMeier().fit(train_df, time_col="T", delta_col="Delta")
         
@@ -272,6 +273,9 @@ class RightCensoredEMTuner(BaseCensoredEMTuner):
         Secondary solver override.
     """
     
+    def __init__(self, data: pd.DataFrame, *args: Any, **kwargs: Any) -> None:
+        super().__init__(last_time_as_event(data), *args, **kwargs)
+
     def _fit_init_estimator(self, norm_constraint: float) -> RightCensoredInitEstimator:
         """Fit an initialization estimator with given norm_constraint."""
         km = KaplanMeier().fit(self.data, time_col="T", delta_col="Delta")
@@ -374,7 +378,7 @@ class RightCensoredJointTuner:
         conservative_selection_rule: str = TUNER_DEFAULTS.conservative_selection_rule,
         conservative_se_multiplier: float = TUNER_DEFAULTS.conservative_se_multiplier,
     ):
-        self.data = data.reset_index(drop=True)
+        self.data = last_time_as_event(data).reset_index(drop=True)
         self.cv_folds = cv_folds
         self.random_state = random_state
         self.n_grid_points = n_grid_points
@@ -439,9 +443,13 @@ class RightCensoredCVOversmoothEMTuner(BaseCVOversmoothEMTuner):
     winner on the full dataset.
     """
 
+    def __init__(self, data: pd.DataFrame, *args: Any, **kwargs: Any) -> None:
+        super().__init__(last_time_as_event(data), *args, **kwargs)
+
     def _fit_init_estimator_on_data(
         self, data: pd.DataFrame, norm_constraint: float,
     ) -> RightCensoredInitEstimator:
+        data = last_time_as_event(data)  # as a fit on this fold would
         km = KaplanMeier().fit(data, time_col="T", delta_col="Delta")
 
         t_vals = np.asarray(data["T"].values, dtype=float)
@@ -512,7 +520,7 @@ class RightCensoredObservedFISTATuner:
         delta_col: str = "Delta",
         fista_kwargs: Optional[Dict[str, Any]] = None,
     ):
-        self.data = data.reset_index(drop=True)
+        self.data = last_time_as_event(data, time_col=time_col, delta_col=delta_col).reset_index(drop=True)
         self.cv_folds = int(cv_folds)
         self.random_state = int(random_state)
         self.n_grid_points = int(n_grid_points)
@@ -622,7 +630,7 @@ class RightCensoredObservedFPGDTuner:
         delta_col: str = "Delta",
         fpgd_kwargs: Optional[Dict[str, Any]] = None,
     ):
-        self.data = data.reset_index(drop=True)
+        self.data = last_time_as_event(data, time_col=time_col, delta_col=delta_col).reset_index(drop=True)
         self.cv_folds = int(cv_folds)
         self.random_state = int(random_state)
         self.n_grid_points = int(n_grid_points)
@@ -745,7 +753,7 @@ class RightCensoredObservedL1Tuner:
         conservative_se_multiplier: float = TUNER_DEFAULTS.conservative_se_multiplier,
         l1_kwargs: Optional[Dict[str, Any]] = None,
     ):
-        self.data = data.reset_index(drop=True)
+        self.data = last_time_as_event(data, time_col=time_col, delta_col=delta_col).reset_index(drop=True)
         self.stage1_estimator = stage1_estimator
         self.cv_folds = int(cv_folds)
         self.random_state = int(random_state)
@@ -965,6 +973,7 @@ class RightCensoredObservedL1Tuner:
 
     def _build_fold_warm_start_theta(self, train_df: pd.DataFrame) -> Optional[np.ndarray]:
         """Fit a fold-local IPCW initializer and project it to the fixed support."""
+        train_df = last_time_as_event(train_df, time_col=self.time_col, delta_col=self.delta_col)  # as a fit on this fold would
         t_vals = np.asarray(train_df[self.time_col].values, dtype=float)
         delta_vals = np.asarray(train_df[self.delta_col].values, dtype=int)
         unc_mask = delta_vals == 1

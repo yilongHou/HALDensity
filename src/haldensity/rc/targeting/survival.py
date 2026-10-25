@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from haldensity.rc.estimators import RightCensoredInitEstimator
-from haldensity.rc.km import KaplanMeier
+from haldensity.rc.km import KaplanMeier, last_time_as_event
 from haldensity.rc.targeting.eic import _compute_exact_survival_eif
 from haldensity.rc.targeting._common import (
     PointwiseTMLEState,
@@ -675,6 +675,7 @@ class RightCensoredSurvivalTargetLearner:
         missing = required_cols.difference(observed_data.columns)
         if missing:
             raise ValueError(f"observed_data is missing required columns: {sorted(missing)}")
+        observed_data = last_time_as_event(observed_data)
 
         targeting_points_arr = _normalize_targeting_points(targeting_points)
         if km is None:
@@ -862,6 +863,7 @@ def right_censored_survival_targeting_M_step_v2(
     missing = required_cols.difference(observed_data.columns)
     if missing:
         raise ValueError(f"observed_data is missing required columns: {sorted(missing)}")
+    observed_data = last_time_as_event(observed_data)
 
     requested_mode = mode
     targeting_points_arr = _normalize_targeting_points(targeting_points)

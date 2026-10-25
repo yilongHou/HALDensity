@@ -41,8 +41,15 @@ def compute_ipcw_weights(
     np.ndarray
         IPCW weights. Zero for censored observations.
 
+    Notes
+    -----
+    The package's estimators pass ``Delta`` with the Kaplan-Meier convention applied (the largest
+    observed time counted as an event, ``last_time_as_event``), as ``KaplanMeier.fit`` does; do the
+    same when calling this directly.
+
     Examples
     --------
+    >>> data = last_time_as_event(data)
     >>> km = KaplanMeier().fit(data)
     >>> weights = compute_ipcw_weights(
     ...     T=data["T"].values,
