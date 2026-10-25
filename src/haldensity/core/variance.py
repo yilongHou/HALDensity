@@ -117,6 +117,7 @@ INVERSES = ("ridge", "cutoff", "scaled_floor")
 # intercept; relative to the column itself, so the test does not depend on the data's units)
 CONSTANT_COLUMN_TOL = 1e-12
 INFORMATIONS = ("empirical", "model")
+INTERVAL_SCALES = ("density", "log")
 
 
 def _covariance_from_information(information: np.ndarray, root: Optional[np.ndarray], n_samples: int,
@@ -295,9 +296,15 @@ def density_confidence_interval(
     alpha: float = 0.05,
     support_refit: SupportRefitArg = "auto",
     *,
+    scale: str = "density",
     _support: tuple[float, float] = SUPPORT,
 ) -> pd.DataFrame:
     """Compute delta-method CIs for density at x_values.
+
+    ``scale`` sets the interval's form from the same SE: ``"density"`` (default) is density +- z SE with
+    the lower end cut at 0 (the paper's formula); ``"log"`` is the interval for the log density mapped back,
+    density * exp(+- z SE / density), which is always positive (Yilong, 2026-10-24: an option while both are
+    compared; the default is unchanged).
 
     The SE uses the same basis as ``cov_beta``: with ``support_refit="auto"`` (default) the
     cleaned basis computed by :func:`estimate_covariance_beta` for this fit if ``cov_beta`` has its
@@ -307,6 +314,8 @@ def density_confidence_interval(
     pass the optimality check), ``se``, ``lower`` and ``upper`` are NaN, with a warning (decision 5,
     Yilong 2026-10-24); ``support_refit=None`` still gives the original-basis SE.
     """
+    if scale not in INTERVAL_SCALES:
+        raise ValueError(f"scale must be one of {INTERVAL_SCALES}, got {scale!r}")
     original_theta = np.array(estimation_results['theta_hat'])
     if isinstance(support_refit, str):
         if support_refit != "auto":
@@ -359,8 +368,13 @@ def density_confidence_interval(
 
     z_critical = norm.ppf(1 - alpha / 2)
     margin_of_error = z_critical * standard_errors
-    lower_bounds = np.maximum(density_eval - margin_of_error, 0)
-    upper_bounds = density_eval + margin_of_error
+    if scale == "log":
+        with np.errstate(divide="ignore", invalid="ignore"):
+            factor = np.exp(margin_of_error / density_eval)
+        lower_bounds, upper_bounds = density_eval / factor, density_eval * factor
+    else:
+        lower_bounds = np.maximum(density_eval - margin_of_error, 0)
+        upper_bounds = density_eval + margin_of_error
 
     result_df = pd.DataFrame({
         'x': x_values,
@@ -370,6 +384,7 @@ def density_confidence_interval(
         'upper': upper_bounds,
     })
     result_df.attrs['basis'] = 'original' if support_refit is None else 'cleaned'
+    result_df.attrs['scale'] = scale
     if support_refit is not None:
         result_df.attrs['basis_certified'] = bool(support_refit.certified)
         result_df.attrs['n_basis_original'] = int(original_theta[basis_order + 1:].nonzero()[0].size)

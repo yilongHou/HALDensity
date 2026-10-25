@@ -212,6 +212,10 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
 - `haldensity.rc.fit_right_censored(method=...)` and `fit_ipcw_hal`, `fit_l1mle_m1`,
   `fit_cvl1mle` (default method), `fit_undersmoothed`: the four right-censored point estimators
   with the same inputs and outputs (`RightCensoredPointEstimate`).
+- `density_confidence_interval(scale=...)` (Yilong, 2026-10-24; core): `"density"` (default, unchanged) is
+  density +- z SE with the lower end cut at 0, the paper's formula; `"log"` maps the interval for the log
+  density back, density * exp(+- z SE / density), from the same SE (always positive). Both are compared in
+  the SE study; which one is claimed is decided there. `result.attrs["scale"]` records the choice.
 - `haldensity.datasets.load_galaxies()` (Roeder 1990 galaxy velocities, km/s) and
   `make_right_censored()`.
 - `haldensity.ic.current_status.current_status_to_interval()`.

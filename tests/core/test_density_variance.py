@@ -127,3 +127,23 @@ def test_constant_columns_are_found_relative_to_each_column():
     assert _constant_columns(basis, scores).tolist() == [True, False, False]       # a tiny column is not constant
     scaled = basis * np.array([1.0, 1e-4, 1e-4])
     assert _constant_columns(scaled, scores * np.array([1.0, 1e-4, 1e-4])).tolist() == [True, False, False]
+
+
+def test_log_scale_interval_uses_the_same_se():
+    # Yilong (2026-10-24): the log-scale interval exp(log p-hat +- z SE / p-hat) as an option; the default is unchanged
+    data, estimator = _fit(2)
+    results = estimator.get_results()
+    x = np.linspace(0.02, 0.9, 7)
+    cov = estimate_covariance_beta(data, results, basis_order=2)
+    density_scale = density_confidence_interval(x, results, cov, basis_order=2)
+    log_scale = density_confidence_interval(x, results, cov, basis_order=2, scale="log")
+    np.testing.assert_array_equal(log_scale["se"], density_scale["se"])
+    factor = np.exp(1.959963984540054 * log_scale["se"] / log_scale["density"])
+    np.testing.assert_allclose(log_scale["lower"], log_scale["density"] / factor, rtol=1e-12)
+    np.testing.assert_allclose(log_scale["upper"], log_scale["density"] * factor, rtol=1e-12)
+    assert np.all(log_scale["lower"] > 0) and log_scale.attrs["scale"] == "log"
+    assert density_scale.attrs["scale"] == "density"
+    np.testing.assert_allclose(density_scale["lower"],
+                               np.maximum(density_scale["density"] - 1.959963984540054 * density_scale["se"], 0))
+    with pytest.raises(ValueError, match="scale"):
+        density_confidence_interval(x, results, cov, basis_order=2, scale="logit")
