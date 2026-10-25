@@ -334,6 +334,10 @@ The old behaviour of these fixes is available at `v0.1.0`.
 ### Removed
 
 - `KFold_CV_LambdaSelector`, `CVSelectorMetric` (unused).
+- Research notebooks moved to their project repositories (Yilong, 2026-10-24; copies checked against the
+  blob hashes, each with a README_COPY.md there): `examples/multivar-HAL/` to multivar-HAL,
+  `examples/AIPW-HAL-MLE/` to HAL_TMLE_RC, `examples/demo_conservative_adjustment_search.ipynb` to
+  uni_EM_HAL_RC. They were never in `v0.1.0`; they stay in this repository's git history.
 - Right-censored comparison helpers (truth objects, error metrics, M1–M4 experiment runner,
   two simulators) and the plug-in pipelines `fit_right_censored_cv_ipcw_l1mle_plugin` /
   `..._undersmoothed_plugin`; moved to the HAL_TMLE_RC project repository and replaced by

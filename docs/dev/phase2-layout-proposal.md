@@ -193,7 +193,7 @@ New files:
 Every row needs Yilong's decision.
 - **T**: rewrite as a curated tutorial in `examples/tutorials/<data type>/`. Public API only, no absolute paths, small outputs, runs in a clean environment, executed in CI.
 - **P**: move to a project repo (the lead copies; the package copy is deleted).
-- **D**: delete (it stays in git history and in `v0.1.0`).
+- **D**: delete (it stays in git history; only the five top-level notebooks and `plotting.py` were in `v0.1.0`).
 
 | File | Size | Proposal |
 | --- | ---: | --- |
