@@ -1,84 +1,63 @@
-# Censored Data Density Estimation Module
+# Censored-data density estimation
 
-This module provides HAL-based density estimation for censored data:
+HAL density estimation when the event time is not always observed. All times live on [0, 1]; rescale by bounds
+fixed in advance.
 
-- **Right-censoring**: IPCW-weighted HAL-MLE and EM refinement
-- **Interval-censoring**: Midpoint initialization and EM refinement
+## Right-censored data (`haldensity.rc`)
 
-## Estimators
+The observed data are `T` (the smaller of the event time and the censoring time) and `Delta` (1 if the event
+was observed).
 
-| Estimator | Description |
-|-----------|-------------|
-| `RightCensoredInitEstimator` | Stage 1 IPCW-weighted HAL for right-censored data |
-| `RightCensoredEMEstimator` | Combined Stage 1 + Stage 2 EM for right-censored data |
-| `RightCensoredEMStage` | Standalone EM refinement stage |
-| `IntervalCensoredInitEstimator` | Stage 1 midpoint-imputed HAL for interval-censored data |
-| `IntervalCensoredEMEstimator` | Combined Stage 1 + Stage 2 EM for interval-censored data |
-| `IntervalCensoredEMStage` | Standalone EM refinement stage |
+**Point estimators, one call each.** `fit_right_censored(data, targeting_points, method=...)` returns the
+fitted density, its survival at the requested points and the frozen fits. All four methods share Stage 1, an
+IPCW-weighted HAL-MLE whose L1 bound M1 is chosen by cross-validation on the IPCW log-likelihood:
 
-## Tuners
+| `method` | point estimator |
+| --- | --- |
+| `"ipcw_hal"` | the Stage-1 IPCW-HAL fit itself (bound M1) |
+| `"l1mle_m1"` | the observed-data L1-MLE on the Stage-1 support at bound M1 |
+| `"cvl1mle"` (default) | the observed-data L1-MLE with the bound chosen by cross-validation over [M1, 2 M1] |
+| `"undersmoothed"` | the observed-data L1-MLE path over [M1, 2 M1], the bound chosen per time point by the TMLE rule |
 
-| Tuner | Description |
-|-------|-------------|
-| `RightCensoredInitTuner` | Stage 1 tuner (Optuna CV) |
-| `RightCensoredEMTuner` | Stage 2 tuner (oversmooth or direct no-oversmooth mode) |
-| `RightCensoredJointTuner` | Convenience wrapper (Stage 1 + Stage 2) |
-| `IntervalCensoredInitTuner` | Stage 1 tuner for interval-censored data |
-| `IntervalCensoredEMTuner` | Stage 2 tuner for interval-censored data |
-| `IntervalCensoredJointTuner` | Convenience wrapper for interval-censored data |
+The result's `fits` hold `RightCensoredHALFit` objects with `density`, `survival` and `rmst`.
 
-## IPCW-EM-HAL-MLE Workflow for Right-Censored Data
+**Targeting (TMLE), the method we propose for univariate right-censored data.** `haldensity.rc.targeting`
+updates an initial fit so that the estimate of a chosen feature solves its efficient score equation, with an
+influence-curve standard error: survival at time points, the mean, the restricted mean survival time, the
+squared-density functional (density L2) and the entropy. Each target has a `..._targeting_M_step(initial_estimator,
+observed_data, ...)` function and a matching `..._estimand_variance(...)`.
 
-```mermaid
-flowchart TD
-  A["Start: Univariate right-censored data (T_i, Delta_i)"] --> B["Estimate censoring S_c via Kaplan-Meier"]
-  B --> C["Choose lambda-grid"]
-  C --> D{"Loop over lambda"}
+**Building blocks.** `KaplanMeier` and `compute_ipcw_weights` (the censoring weights),
+`RightCensoredInitEstimator` (the IPCW-weighted HAL-MLE), `RightCensoredObservedL1MLE` (the observed-data
+L1-MLE; FISTA and projected-gradient variants), and their tuners `RightCensoredInitTuner` and
+`RightCensoredObservedL1Tuner`.
 
-  D --> E["Initial estimator: IPCW-HAL-MLE with weights 1/S_c for Delta=1"]
-  E --> F0["Initialize theta from IPCW estimator"]
-  F0 --> G{"Converged?"}
-  G -->|No| H1["E-step: Multiple Imputation of T for Delta=0"]
-  H1 --> H2["Form m pseudo full-data sets; pool sufficient stats"]
-  H2 --> H3["M-step: HAL-MLE on pseudo full-data with SAME lambda"]
-  H3 --> H4["k <- k+1"]
-  H4 --> G
-  G -->|Yes| I["theta_EM at lambda"]
+**AIPW.** `right_censored_survival_aipw` is an augmented-IPCW estimator of survival; it is not a plug-in of a
+density fit.
 
-  I --> J["Compute CV risk for lambda"]
-  J --> K{"All lambda done?"}
-  K -->|No| D
-  K -->|Yes| L["Select lambda* = argmin CVRisk"]
-  L --> M["Refit EM at lambda* on full data"]
-  M --> N["Output: theta_EM, density, survival, hazard"]
-  N --> O[End]
+The censored-data estimators normalize the density on their own fitting grid; the accurate normalizer of the
+full-data estimators is not used here yet.
+
+## Interval-censored data (`haldensity.ic`)
+
+The observed data are intervals `(L, R]` that contain the event time.
+
+**Initial fit.** `IntervalCensoredInitEstimator` fits the HAL-MLE to the interval midpoints;
+`IntervalCensoredInitTuner` chooses its bound by cross-validation.
+
+**Direct optimization of the observed-data likelihood.** `IntervalCensoredFISTAEstimator` and
+`IntervalCensoredProjectedGDEstimator` maximize the interval likelihood itself, with the tuners
+`IntervalCensoredFISTATuner` and `IntervalCensoredProjectedGDTuner`. First-order methods suit these problems
+better than second-order ones (see `examples/ic_FISTA.md`).
+
+**Current-status data** (one inspection time per subject, with an indicator of whether the event had happened):
+`haldensity.ic.current_status.current_status_to_interval` turns them into intervals.
+
+## Where things live
+
 ```
-
-## Module Structure
-
-```
-censoring/
-  __init__.py           # Main exports
-  _defaults.py          # EMDefaults, TunerDefaults, EMStageResult
-  _base_mle.py          # WeightedHALMLEEstimator (shared)
-  README.md             # This file
-  right/
-    __init__.py
-    estimators.py       # RC estimators
-    km.py               # KaplanMeier
-    weights.py          # IPCW weights
-    metrics.py          # RC metrics
-  interval/
-    __init__.py
-    estimators.py       # IC estimators
-    metrics.py          # IC metrics
-  tuners/
-    __init__.py
-    _base.py            # Base tuner classes
-    _utils.py           # Tuner helpers
-    right_tuners.py     # RC tuners
-    interval_tuners.py  # IC tuners
-  utils/
-    __init__.py
-    common_metrics.py   # kl_divergence
+rc/            km.py, weights.py, estimators.py (IPCW initial fit), observed_mle.py, tuners.py,
+               pipelines.py (fit_right_censored), fit.py (RightCensoredHALFit), aipw.py, targeting/
+ic/            estimators.py, tuners.py, metrics.py, current_status/
+core/          univariate/weighted_mle.py (the weighted HAL-MLE shared by both)
 ```

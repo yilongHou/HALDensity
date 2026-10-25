@@ -338,6 +338,12 @@ The old behaviour of these fixes is available at `v0.1.0`.
   blob hashes, each with a README_COPY.md there): `examples/multivar-HAL/` to multivar-HAL,
   `examples/AIPW-HAL-MLE/` to HAL_TMLE_RC, `examples/demo_conservative_adjustment_search.ipynb` to
   uni_EM_HAL_RC. They were never in `v0.1.0`; they stay in this repository's git history.
+- `examples/example_right_censored_density_estimator.ipynb` (in `v0.1.0`) moved to HAL_TMLE_RC: EM stays in
+  the API but is no longer presented in the README, the docs or the tutorials (Yilong, 2026-10-24: for
+  interval-censored and current-status data, optimizing the observed-data likelihood directly works better;
+  EM may return with stochastic EM). `docs/censored-data.md` is rewritten for the 0.2.0 layout around the
+  recommended routes: the four right-censored point estimators and targeting, and for interval-censored data
+  the midpoint initial fit followed by direct optimization (FISTA, projected gradient).
 - Right-censored comparison helpers (truth objects, error metrics, M1–M4 experiment runner,
   two simulators) and the plug-in pipelines `fit_right_censored_cv_ipcw_l1mle_plugin` /
   `..._undersmoothed_plugin`; moved to the HAL_TMLE_RC project repository and replaced by

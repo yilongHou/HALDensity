@@ -12,8 +12,8 @@ Features
 - Delta-method style density bands; bootstrap example included
 - Targeted learning (TMLE) for survival, mean, and median
 - **Censored data support**:
-  - Right-censored density estimation via IPCW initialization, EM + MI, the observed-data L1-MLE and censoring-aware tuning; four point estimators with one call each (`haldensity.rc.fit_right_censored`) and targeting for survival, mean, RMST, density L2 and entropy
-  - Interval-censored density estimation via midpoint initialization and EM refinement; current-status data through `haldensity.ic.current_status`
+  - Right-censored density estimation via IPCW initialization and the observed-data L1-MLE with censoring-aware tuning; four point estimators with one call each (`haldensity.rc.fit_right_censored`) and targeting (TMLE) for survival, mean, RMST, density L2 and entropy
+  - Interval-censored density estimation via midpoint initialization and direct optimization of the observed-data likelihood (FISTA, projected gradient); current-status data through `haldensity.ic.current_status`
 - Multivariate full-data HAL (`haldensity.full_multi`, experimental)
 - Sample data and simple simulators (`haldensity.datasets`, including the galaxy velocities)
 
@@ -181,7 +181,6 @@ until then some notebooks below still use pre-0.2.0 import paths.
 - `examples/example_full_data_density_estimator.ipynb`: quick demo of estimators on fully observed data
 - `examples/example_full_data_target_learning.ipynb`: targeting examples (TMLE for CDF, survival, moments, median)
 - `examples/example_full_data_case_study.ipynb`: real-data galaxy velocity case study
-- `examples/example_right_censored_density_estimator.ipynb`: right-censored density estimation workflow (IPCW + EM)
 - `examples/example_interval_censored_density_estimator.ipynb`: interval-censored density estimation workflow
 
 Repository Structure
@@ -189,13 +188,13 @@ Repository Structure
 ```
 src/haldensity/
   core/         # shared by data types: basis (univariate and general d), univariate HAL base
-                # (BaseEstimator, weighted MLE, HALFit), solvers, CV, EM, variance, metrics
+                # (BaseEstimator, weighted MLE, HALFit), solvers, CV, variance, metrics
   full_uni/     # univariate full data: estimators (one per solver), Optuna tuner, targeting
   full_multi/   # multivariate full data (normalizer by Sobol QMC or exact k = 0 cells)
-  rc/           # right-censored: IPCW/EM, observed-data L1-MLE, tuners, pipelines, AIPW, targeting/
+  rc/           # right-censored: IPCW, observed-data L1-MLE, tuners, pipelines, AIPW, targeting/
   ic/           # interval-censored: estimators, tuners; current_status/
   datasets/     # sample data (galaxies) and simple simulators
-docs/           # censored-data workflow notes; dev/ (layout, experiment write-ups)
+docs/           # censored-data overview; dev/ (layout, decisions, experiment write-ups)
 examples/       # notebooks
 ```
 
