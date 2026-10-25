@@ -25,7 +25,7 @@ import warnings
 
 from haldensity.core.basis.univariate import create_basis_functions
 from haldensity.core.options import take_deprecated
-from haldensity.core.univariate.normalizer import log_unnormalized_density, quadrature_rule
+from haldensity.core.univariate.normalizer import SUPPORT, log_unnormalized_density, quadrature_rule
 from haldensity.core.univariate.support import SupportRefit, refit_support
 
 SupportRefitArg = Union[SupportRefit, None, str]
@@ -112,19 +112,34 @@ def _theta_for_se(estimation_results: dict, support_refit: Optional[SupportRefit
     return np.asarray(support_refit.theta, dtype=float)
 
 
-INVERSES = ("ridge", "cutoff")
+INVERSES = ("ridge", "cutoff", "scaled_floor")
+# a column whose centred score has an RMS below this fraction of the largest is constant (the intercept)
+CONSTANT_COLUMN_TOL = 1e-12
 INFORMATIONS = ("empirical", "model")
 
 
 def _covariance_from_information(information: np.ndarray, root: Optional[np.ndarray], n_samples: int,
-                                 inverse: str, ridge_param: float, relative_cutoff: float) -> np.ndarray:
+                                 inverse: str, ridge_param: float, relative_cutoff: float,
+                                 floor: float = 1e-6) -> np.ndarray:
     """Cov(beta-hat) = information^{-1} / n.
 
     "ridge": the inverse of information + ridge_param * I (an absolute ridge, the package default).
     "cutoff": the pseudo-inverse from the singular values of ``root`` (information = root' root), dropping
     the directions whose eigenvalue is below ``relative_cutoff`` times the largest (the intercept's
     direction is exactly zero), so no constant depends on the scale of the basis functions.
+    "scaled_floor": the information scaled to unit diagonal, R = D^-1 I D^-1 with d_j the RMS of the centred
+    score of column j, and Cov = D^-1 (R + floor * I)^-1 D^-1 / n, i.e. a ridge of floor * d_j^2 on coordinate
+    j: no units, so the SE does not change when the data's units do. Columns whose centred score is zero (the
+    intercept, and any column constant on the support) are dropped: their rows and columns of Cov are zero.
     """
+    if inverse == "scaled_floor":
+        scale = np.sqrt(np.clip(np.diag(information), 0.0, None))
+        keep = scale > CONSTANT_COLUMN_TOL * scale.max(initial=0.0)
+        outer = np.outer(scale[keep], scale[keep])
+        covariance = np.zeros_like(information)
+        covariance[np.ix_(keep, keep)] = (np.linalg.inv(information[np.ix_(keep, keep)] / outer
+                                                        + floor * np.eye(int(keep.sum()))) / outer / n_samples)
+        return covariance
     if inverse == "ridge":
         regularized_information = information + ridge_param * np.eye(information.shape[0])
         try:
@@ -139,9 +154,10 @@ def _covariance_from_information(information: np.ndarray, root: Optional[np.ndar
     return (directions / eigenvalues[keep]) @ directions.T / n_samples
 
 
-def _model_information_root(theta_hat_full: np.ndarray, knots: np.ndarray, basis_order: int) -> np.ndarray:
+def _model_information_root(theta_hat_full: np.ndarray, knots: np.ndarray, basis_order: int,
+                            support: tuple[float, float] = SUPPORT) -> np.ndarray:
     """R with R' R = Cov(phi) under the fitted density (the model-based information), on the selected basis."""
-    points, weights, result = quadrature_rule(theta_hat_full, knots, basis_order)
+    points, weights, result = quadrature_rule(theta_hat_full, knots, basis_order, support)
     mass = weights * np.exp(log_unnormalized_density(points, theta_hat_full, knots, basis_order) - result.log_z)
     phi = _basis(points, _selected_knots(theta_hat_full, knots, basis_order), basis_order)
     return np.sqrt(mass)[:, np.newaxis] * (phi - mass @ phi)
@@ -157,6 +173,8 @@ def estimate_covariance_beta(
     _inverse: str = "ridge",
     _relative_cutoff: float = 1e-10,
     _information: str = "empirical",
+    _floor: float = 1e-6,
+    _support: tuple[float, float] = SUPPORT,
     **deprecated,
 ) -> np.ndarray:
     """Estimate Cov(β̂) via observed Fisher information with ridge regularization.
@@ -169,7 +187,9 @@ def estimate_covariance_beta(
     inverts the information through its singular values with a relative cutoff ``_relative_cutoff`` instead
     of adding the absolute ridge ``_ridge_param``; ``_information="model"`` uses the covariance of the
     basis under the fitted density instead of the empirical information P_n S S' (a reference only; the
-    paper recommends the empirical one).
+    paper recommends the empirical one); ``_inverse="scaled_floor"`` adds ``_floor`` times each column's own
+    score variance (the scaled floor, round 2). ``_support`` (default [0, 1]) is the interval the fitted
+    density lives on, for tests that rescale the data's units.
     """
     # ridge_param (0.1.0) is internal since 0.2.0; accepted through 0.2.x with a DeprecationWarning
     ridge_param = take_deprecated("estimate_covariance_beta", deprecated, {"ridge_param": "_ridge_param"}).get(
@@ -194,18 +214,18 @@ def estimate_covariance_beta(
     n_samples = len(data)
 
     selected_knots = _selected_knots(theta_hat_full, knots, basis_order)
-    _, expected_phi = _fitted_expectation(theta_hat_full, knots, basis_order)
+    _, expected_phi = _fitted_expectation(theta_hat_full, knots, basis_order, _support)
     basis_matrix_selected = _basis(data, selected_knots, basis_order)
 
     scores = basis_matrix_selected - expected_phi[np.newaxis, :]
     if _information == "model":
-        root = _model_information_root(theta_hat_full, knots, basis_order)
+        root = _model_information_root(theta_hat_full, knots, basis_order, _support)
         information = root.T @ root
     else:
         root = scores / np.sqrt(n_samples)
         information = (scores.T @ scores) / n_samples
     covariance_matrix = _covariance_from_information(information, root, n_samples, _inverse, ridge_param,
-                                                     _relative_cutoff)
+                                                     _relative_cutoff, _floor)
 
     covariance = covariance_matrix.view(BasisCovariance)
     covariance.support_refit = support_refit
@@ -222,10 +242,11 @@ def _basis(x: Union[pd.DataFrame, np.ndarray], knots: np.ndarray, basis_order: i
     return create_basis_functions(frame, knots, order=basis_order, include_intercept=True)[0]
 
 
-def _fitted_expectation(theta_hat_full: np.ndarray, knots: np.ndarray, basis_order: int) -> tuple[float, np.ndarray]:
+def _fitted_expectation(theta_hat_full: np.ndarray, knots: np.ndarray, basis_order: int,
+                        support: tuple[float, float] = SUPPORT) -> tuple[float, np.ndarray]:
     """log Z and E[phi] over the selected basis under the fitted density, with the rule of the accurate
     normalizer (Gauss-Legendre with breakpoints at the selected knots; exact for k = 0)."""
-    points, weights, result = quadrature_rule(theta_hat_full, knots, basis_order)
+    points, weights, result = quadrature_rule(theta_hat_full, knots, basis_order, support)
     mass = weights * np.exp(log_unnormalized_density(points, theta_hat_full, knots, basis_order) - result.log_z)
     phi = _basis(points, _selected_knots(theta_hat_full, knots, basis_order), basis_order)
     return result.log_z, mass @ phi
@@ -236,6 +257,7 @@ def _evaluation_pieces(
     theta_hat_full: np.ndarray,
     knots: np.ndarray,
     basis_order: int,
+    support: tuple[float, float] = SUPPORT,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """(selected theta, basis at x on the selection, density at x, E[phi]) for one coefficient vector; the
     density is normalized with the accurate normalizer, as ``get_density_at_points`` does."""
@@ -244,7 +266,7 @@ def _evaluation_pieces(
         theta_hat_full[basis_order + 1:].nonzero()[0] + basis_order + 1,
     ])
     theta_hat = theta_hat_full[theta_selected_ind]
-    log_z, expected_phi = _fitted_expectation(theta_hat_full, knots, basis_order)
+    log_z, expected_phi = _fitted_expectation(theta_hat_full, knots, basis_order, support)
     phi_eval_selected = _basis(x_values, _selected_knots(theta_hat_full, knots, basis_order), basis_order)
     log_density = log_unnormalized_density(x_values, theta_hat_full, knots, basis_order) - log_z
     density_eval = np.exp(np.clip(log_density, -745.0, 709.0))
@@ -258,6 +280,8 @@ def density_confidence_interval(
     basis_order: int,
     alpha: float = 0.05,
     support_refit: SupportRefitArg = "auto",
+    *,
+    _support: tuple[float, float] = SUPPORT,
 ) -> pd.DataFrame:
     """Compute delta-method CIs for density at x_values.
 
@@ -286,17 +310,17 @@ def density_confidence_interval(
             else:
                 support_refit = None
     knots = np.unique(np.array(estimation_results['data_points']))
-    x_values = np.clip(x_values, 0, 1)
+    x_values = np.clip(x_values, *_support)
     if _cleaning_failed(support_refit):
         warnings.warn(NO_SE_WARNING, UserWarning, stacklevel=2)
-        density_eval = _evaluation_pieces(x_values, original_theta, knots, basis_order)[2]
+        density_eval = _evaluation_pieces(x_values, original_theta, knots, basis_order, _support)[2]
         nan = np.full(len(x_values), np.nan)
         result_df = pd.DataFrame({'x': x_values, 'density': density_eval, 'se': nan, 'lower': nan, 'upper': nan})
         result_df.attrs.update(basis='cleaned', basis_certified=False, se='none: basis cleaning failed')
         return result_df
 
     theta_hat, phi_eval_selected, density_se_basis, expected_phi = _evaluation_pieces(
-        x_values, _theta_for_se(estimation_results, support_refit), knots, basis_order
+        x_values, _theta_for_se(estimation_results, support_refit), knots, basis_order, _support
     )
     if cov_beta.shape != (theta_hat.size, theta_hat.size):
         raise ValueError(
@@ -307,7 +331,7 @@ def density_confidence_interval(
         density_eval = density_se_basis
     else:
         # the point estimate stays the original fit; only the SE uses the cleaned basis
-        density_eval = _evaluation_pieces(x_values, original_theta, knots, basis_order)[2]
+        density_eval = _evaluation_pieces(x_values, original_theta, knots, basis_order, _support)[2]
 
     n_eval = len(x_values)
     standard_errors = np.zeros(n_eval)

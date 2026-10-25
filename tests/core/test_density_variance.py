@@ -77,3 +77,40 @@ def test_relative_cutoff_and_model_information_are_internal_candidates():
         estimate_covariance_beta(data, results, basis_order=1, _inverse="pinv")
     with pytest.raises(ValueError, match="_information"):
         estimate_covariance_beta(data, results, basis_order=1, _information="observed")
+
+
+def _squeezed(results, data, k, s):
+    """The same fit in units squeezed by s: x' = s x on [0, s], so p'(x') = p(x) / s exactly."""
+    theta = np.asarray(results["theta_hat"], dtype=float).copy()
+    first = 1 if k == 0 else k + 1
+    for r in range(1, k + 1):
+        theta[r] /= s ** r                                # x'^r = s^r x^r
+    theta[first:] /= s ** k                               # (x' - s xi)_+^k = s^k (x - xi)_+^k; I(.) unchanged at k = 0
+    knots = np.unique(np.asarray(results["data_points"], dtype=float)) * s
+    return {"theta_hat": theta, "data_points": knots}, pd.DataFrame({"W1": data["W1"] * s})
+
+
+@pytest.mark.parametrize("k", [0, 1, 2])
+def test_the_scaled_floor_does_not_depend_on_units(k):
+    # round 2 (Yilong, 2026-10-24): a ridge of floor * (each column's own score variance) has no units
+    data, estimator = _fit(k)
+    results = estimator.get_results()
+    x, s = np.linspace(0.05, 0.6, 5), 0.08
+    squeezed, squeezed_data = _squeezed(results, data, k, s)
+
+    def se(res, d, points, support, **options):
+        cov = estimate_covariance_beta(d, res, basis_order=k, support_refit=None, _support=support, **options)
+        return density_confidence_interval(points, res, cov, basis_order=k, support_refit=None, _support=support)
+
+    for options in ({"_inverse": "scaled_floor", "_floor": 1e-6}, {"_inverse": "scaled_floor", "_floor": 1e-3},
+                    {"_inverse": "scaled_floor", "_floor": 1e-6, "_information": "model"}):
+        original = se(results, data, x, (0.0, 1.0), **options)
+        rescaled = se(squeezed, squeezed_data, s * x, (0.0, s), **options)
+        np.testing.assert_allclose(rescaled["density"] * s, original["density"], rtol=1e-9)
+        np.testing.assert_allclose(rescaled["se"] * s, original["se"], rtol=1e-8)
+    if k >= 1:                                            # the absolute ridge depends on the units
+        original = se(results, data, x, (0.0, 1.0), _ridge_param=1e-6)
+        rescaled = se(squeezed, squeezed_data, s * x, (0.0, s), _ridge_param=1e-6)
+        assert np.max(np.abs(rescaled["se"] * s / original["se"] - 1)) > 1e-3
+    cov = estimate_covariance_beta(data, results, basis_order=k, support_refit=None, _inverse="scaled_floor")
+    assert np.all(cov[0] == 0)                            # the intercept's centred score is zero: dropped
