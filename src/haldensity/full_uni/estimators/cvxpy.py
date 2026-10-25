@@ -50,8 +50,9 @@ def missed_mass_message(gap: float, n_grid_points: int, x: np.ndarray) -> str:
         f"{MISSED_MASS_WARNING}: its log normalizer is {gap:.3g} nats below the accurate one, so it saw "
         f"{100 * np.exp(-gap):.1f}% of the mass (warning above {MISSED_MASS_WARNING_NATS} nats). The data span "
         f"{span:.3g} of [0, 1], too little for the {int(n_grid_points) - 1} cells of n_grid_points="
-        f"{int(n_grid_points)}; refit with a larger n_grid_points, e.g. n_grid_points={suggested} (about "
-        f"{MISSED_MASS_CELLS_ACROSS_DATA} cells across the data)."
+        f"{int(n_grid_points)}. Refit with a larger grid, about {MISSED_MASS_CELLS_ACROSS_DATA} cells across the "
+        f"data: pass n_grid_points={suggested} to the estimator (through the tuner: "
+        f"estimator_kwargs={{'n_grid_points': {suggested}}})."
     )
 
 

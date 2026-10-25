@@ -38,7 +38,8 @@ def test_concentrated_data_warn_with_a_grid_that_removes_the_gap():
         coarse = CVXPYEstimator(norm_constraint=GALAXIES_M, basis_order=2, log_frequency=-1).fit(data)
     messages = _missed_mass_warnings(caught)
     assert coarse.get_results()["log_z_gap"] > 0.01 and len(messages) == 1
-    suggested = int(re.search(r"n_grid_points=(\d+) \(about", messages[0]).group(1))
+    suggested = int(re.search(r"pass n_grid_points=(\d+) to the estimator", messages[0]).group(1))
+    assert f"estimator_kwargs={{'n_grid_points': {suggested}}}" in messages[0]      # the tuner's route
     assert suggested == 2400                          # 200 cells across the data range (span 0.0837)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")

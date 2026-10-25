@@ -112,7 +112,8 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   (removed in 0.3.0). Every fit records the missed-mass diagnostic `get_results()["log_z_gap"]`
   (`log_z_gap_`): the accurate log normalizer minus the objective's, in nats, at the point estimate. Above
   0.01 nats the fit warns and suggests `n_grid_points` of about 200 / (max x - min x), 200 cells across the
-  data (silent inside CV folds; the final fit shows it). Galaxies (v / 3e5, 8% of [0, 1]; k = 2, MOSEK, the
+  data, naming both routes: the estimator's argument and, through the tuner, `estimator_kwargs` (silent
+  inside CV folds; the final fit shows it). Galaxies (v / 3e5, 8% of [0, 1]; k = 2, MOSEK, the
   case study's M = 596,793): with 200 points the gap is 0.064 nats (the objective saw 93.8% of the fitted
   mass), the main peak 80.7 and the exact 5-fold CV score 3.1670; with 1,000 points the gap is 0, the peak
   65.2 and the score 3.1792; with 2,000 the gap is 0, the peak 65.2 and the score 3.1794. One 5-fold CV
