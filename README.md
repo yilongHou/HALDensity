@@ -9,7 +9,8 @@ Features
 - Standardized estimator interface with a lightweight `BaseEstimator`
 - Pydantic `CommonEstimatorResults` schema for uniform results
 - Cross-validation and hyperparameter tuning via Optuna
-- Delta-method style density bands; bootstrap example included
+- Pointwise delta-method intervals for the density (`haldensity.core.variance`), with a standard error that
+  does not depend on the data's units
 - Targeted learning (TMLE) for survival, mean, and median
 - **Censored data support**:
   - Right-censored density estimation via IPCW initialization and the observed-data L1-MLE with censoring-aware tuning; four point estimators with one call each (`haldensity.rc.fit_right_censored`) and targeting (TMLE) for survival, mean, RMST, density L2 and entropy
