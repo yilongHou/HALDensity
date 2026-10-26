@@ -81,3 +81,30 @@ def test_pipeline_counts_a_censored_largest_time_as_the_last_failure():
         stage1_param_overrides={"basis_order": [0], "norm_constraint": {"low": 3.0, "high": 6.0, "log": False}},
     )
     assert est.fit_at(0.5).last_failure == pytest.approx(float(data["T"].max()))
+
+
+def test_validation_folds_keep_the_observed_status(monkeypatch):
+    # review R2: the convention applies to each training fold and the final fit, not to the sample before the
+    # folds are split; the held-out log-likelihood sees the data as observed, so a censored largest time stays
+    # censored there (Stage-1 CV and the observed-data L1 CV both score through tuners.incomplete_loglik)
+    import haldensity.rc.tuners as tuners
+
+    data = _censored_last(64)
+    t_max = float(data["T"].max())
+    held_out = []
+    original = tuners.incomplete_loglik
+
+    def recording(estimator, val_df, **kwargs):
+        held_out.append(val_df.copy())
+        return original(estimator, val_df, **kwargs)
+
+    monkeypatch.setattr(tuners, "incomplete_loglik", recording)
+    fit_right_censored(
+        data, [0.5], method="cvl1mle", cv_folds=2, n_trials=2, random_state=7, n_grid_points=80,
+        stage1_param_overrides={"basis_order": [0], "norm_constraint": {"low": 3.0, "high": 6.0, "log": False}},
+        norm_constraint_factors=[1.0, 1.5],
+        l1_kwargs={"n_grid_points": 80, "learning_rate": 0.1, "n_iterations": 60, "ll_change_tol": 1e-3},
+    )
+    with_max = [v for v in held_out if np.any(v["T"].to_numpy() == t_max)]
+    assert with_max, "no held-out fold contained the largest time"
+    assert all(int(v.loc[v["T"] == t_max, "Delta"].iloc[0]) == 0 for v in with_max)

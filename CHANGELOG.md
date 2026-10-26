@@ -349,10 +349,13 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
 - **Right-censored data: the largest observed time counts as an event when it is censored** (the
   Kaplan–Meier convention; Yilong, 2026-10-24; rc). `KaplanMeier.fit` applies it to the data it is fitted
   on, so the censoring survival estimate stays positive at every observed time; before, it fell to 0 at a
-  censored largest time. The IPCW-HAL fit, the observed-data estimators, the EM estimators, every
-  right-censored tuner (the sample, and each CV training fold as a fit on that fold would), the pipelines,
-  the five targeting steps and AIPW apply it to their data, so the IPCW weights, the likelihoods and the
-  influence curves count that observation as an event; held-out losses use the validation data as given.
+  censored largest time. The IPCW-HAL fit, the observed-data estimators, the EM estimators, the five
+  targeting steps and AIPW apply it to their data, so the IPCW weights, the likelihoods and the influence
+  curves count that observation as an event. The right-censored tuners split their folds on the data as
+  observed and apply it to each training fold and to the final fit only; held-out losses see the
+  validation data as observed (review R2, 2026-10-25: applying it to the sample before the split had let
+  a validation fold score a censored largest time as an event; on the rc/01 tutorial's sample Stage-1 CV
+  then picked M1 = 26.6 instead of 78.6).
   New `haldensity.rc.last_time_as_event(data)` applies it (use it before calling `compute_ipcw_weights`
   directly). Why: when the largest time was censored (about 10% of samples in the tutorials' design,
   Beta(2.2, 2.5) event times with Uniform[0, 1.2] censoring, at n = 200 to 1,000), the influence curves of
