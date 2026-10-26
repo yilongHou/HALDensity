@@ -11,7 +11,8 @@ from haldensity.rc.km import KaplanMeier, last_time_as_event
 from haldensity.rc.targeting.eic import (
     _build_unbounded_wald_interval_allow_nan,
     _compute_exact_density_l2_eif,
-    _estimate_positivity_filtered_eic_variance,
+    _gbar_floor_active,
+    _raw_gbar,
 )
 from haldensity.rc.targeting._common import (
     RCCensoringCache,
@@ -685,15 +686,9 @@ class RightCensoredDensityL2TargetLearner:
         if init_state.eif_values is None:
             raise RuntimeError("Initial density-L2 TMLE state is missing EIC values.")
         init_var_all_eic, init_se_all_eic = _estimate_eic_variance(init_state.eif_values)
-        init_filtered_eic = _estimate_positivity_filtered_eic_variance(
-            eic_values=init_state.eif_values,
-            target_grid=_state_to_target_grid(init_state),
-            censoring_cache=censoring_cache,
-            observed_data=observed_data,
-            clip=targeting_gbar_floor,
+        gbar_floor_active = _gbar_floor_active(
+            _state_to_target_grid(init_state), censoring_cache, targeting_gbar_floor
         )
-        init_filtered_var = float(init_filtered_eic["estimand_variance"])
-        init_filtered_se = float(init_filtered_eic["standard_error"])
         raw_init_tolerance, threshold_initial = _iterative_tolerance_from_sigma(
             init_state.eif_sigma,
             n_obs,
@@ -710,9 +705,6 @@ class RightCensoredDensityL2TargetLearner:
             final_eif_mean = float(init_state.eif_mean)
             final_var_all_eic = float(init_var_all_eic)
             final_se_all_eic = float(init_se_all_eic)
-            final_filtered_eic = init_filtered_eic
-            final_filtered_var = float(init_filtered_var)
-            final_filtered_se = float(init_filtered_se)
             final_stop_reason = "initial_score_tolerance"
             final_n_iterations = 0
             final_epsilon = 0.0
@@ -741,8 +733,6 @@ class RightCensoredDensityL2TargetLearner:
                 "standard_error": float(init_se_all_eic),
                 "estimand_variance_all_eic": float(init_var_all_eic),
                 "standard_error_all_eic": float(init_se_all_eic),
-                "estimand_variance_clip_active_filtered": float(init_filtered_var),
-                "standard_error_clip_active_filtered": float(init_filtered_se),
                 "sigma_over_sqrtnlogn": float(raw_init_tolerance),
                 "threshold": float(threshold_initial),
                 "epsilon": 0.0,
@@ -752,7 +742,6 @@ class RightCensoredDensityL2TargetLearner:
                 "solve_method": "skipped_initial_gate",
                 "status": "skipped_initial_gate",
             }
-            one_step_filtered_eic = init_filtered_eic
         else:
             one_step_bundle = _iterate_density_l2_tmle(
                 initial_fit=initial_fit,
@@ -778,21 +767,8 @@ class RightCensoredDensityL2TargetLearner:
                 raise RuntimeError("One-step density-L2 TMLE state is missing EIC values.")
             one_step_var_all_eic = float(one_step_stage["estimand_variance"])
             one_step_se_all_eic = float(one_step_stage["standard_error"])
-            one_step_filtered_eic = _estimate_positivity_filtered_eic_variance(
-                eic_values=one_step_state.eif_values,
-                target_grid=_state_to_target_grid(one_step_state),
-                censoring_cache=censoring_cache,
-                observed_data=observed_data,
-                clip=targeting_gbar_floor,
-            )
             one_step_stage["estimand_variance_all_eic"] = one_step_var_all_eic
             one_step_stage["standard_error_all_eic"] = one_step_se_all_eic
-            one_step_stage["estimand_variance_clip_active_filtered"] = float(
-                one_step_filtered_eic["estimand_variance"]
-            )
-            one_step_stage["standard_error_clip_active_filtered"] = float(
-                one_step_filtered_eic["standard_error"]
-            )
 
             run_full_iterative = mode == "iterative" or mode == "auto"
             if mode == "one_step" or not run_full_iterative:
@@ -822,15 +798,6 @@ class RightCensoredDensityL2TargetLearner:
             final_eif_mean = float(final_summary["eif_mean"])
             final_var_all_eic = float(final_summary["estimand_variance"])
             final_se_all_eic = float(final_summary["standard_error"])
-            final_filtered_eic = _estimate_positivity_filtered_eic_variance(
-                eic_values=final_state.eif_values,
-                target_grid=_state_to_target_grid(final_state),
-                censoring_cache=censoring_cache,
-                observed_data=observed_data,
-                clip=targeting_gbar_floor,
-            )
-            final_filtered_var = float(final_filtered_eic["estimand_variance"])
-            final_filtered_se = float(final_filtered_eic["standard_error"])
             final_stop_reason = str(final_summary["stop_reason"])
             final_n_iterations = int(final_summary["n_iterations"])
             final_epsilon = float(final_summary["epsilon_last"])
@@ -889,8 +856,6 @@ class RightCensoredDensityL2TargetLearner:
                     "standard_error": float(init_se_all_eic),
                     "estimand_variance_all_eic": float(init_var_all_eic),
                     "standard_error_all_eic": float(init_se_all_eic),
-                    "estimand_variance_clip_active_filtered": float(init_filtered_var),
-                    "standard_error_clip_active_filtered": float(init_filtered_se),
                     "gbar_clip": float(self.clip),
                     "targeting_gbar_floor": float(targeting_gbar_floor),
                     "targeting_gbar_floor_scale": (
@@ -898,9 +863,7 @@ class RightCensoredDensityL2TargetLearner:
                         if self.targeting_gbar_floor_scale is not None
                         else float("nan")
                     ),
-                    "clip_active_eic_included_count": int(init_filtered_eic["included_count"]),
-                    "clip_active_eic_excluded_count": int(init_filtered_eic["excluded_count"]),
-                    "clip_active_eic_excluded_rate": float(init_filtered_eic["excluded_rate"]),
+                    "gbar_floor_active": gbar_floor_active,
                     "ci_lower": ci_lower,
                     "ci_upper": ci_upper,
                     "score_at_zero": float(init_state.score_at_zero if final_summary is None else final_summary["score_at_zero"]),
@@ -931,12 +894,6 @@ class RightCensoredDensityL2TargetLearner:
                     "standard_error_initial_stage": float(init_se_all_eic),
                     "estimand_variance_all_eic_initial_stage": float(init_var_all_eic),
                     "standard_error_all_eic_initial_stage": float(init_se_all_eic),
-                    "estimand_variance_clip_active_filtered_initial_stage": float(
-                        init_filtered_var
-                    ),
-                    "standard_error_clip_active_filtered_initial_stage": float(
-                        init_filtered_se
-                    ),
                     "psi_one_step": float(one_step_stage["psi_star"]),
                     "eif_mean_one_step": float(one_step_stage["eif_mean"]),
                     "sigma_one_step": float(one_step_stage["sigma"]),
@@ -959,12 +916,6 @@ class RightCensoredDensityL2TargetLearner:
                     "standard_error_all_eic_one_step": float(
                         one_step_stage["standard_error_all_eic"]
                     ),
-                    "estimand_variance_clip_active_filtered_one_step": float(
-                        one_step_stage["estimand_variance_clip_active_filtered"]
-                    ),
-                    "standard_error_clip_active_filtered_one_step": float(
-                        one_step_stage["standard_error_clip_active_filtered"]
-                    ),
                     "score_at_zero_one_step": float(one_step_stage["score_at_zero"]),
                     "score_at_solution_one_step": float(one_step_stage["score_at_solution"]),
                     "status_one_step": str(one_step_stage["status"]),
@@ -983,21 +934,6 @@ class RightCensoredDensityL2TargetLearner:
                     "standard_error_final": final_se_all_eic,
                     "estimand_variance_all_eic_final": final_var_all_eic,
                     "standard_error_all_eic_final": final_se_all_eic,
-                    "estimand_variance_clip_active_filtered_final": float(
-                        final_filtered_var
-                    ),
-                    "standard_error_clip_active_filtered_final": float(
-                        final_filtered_se
-                    ),
-                    "clip_active_eic_included_count_final": int(
-                        final_filtered_eic["included_count"]
-                    ),
-                    "clip_active_eic_excluded_count_final": int(
-                        final_filtered_eic["excluded_count"]
-                    ),
-                    "clip_active_eic_excluded_rate_final": float(
-                        final_filtered_eic["excluded_rate"]
-                    ),
                     "epsilon_last": final_epsilon,
                     "continued_past_one_step": continued_past_one_step,
                     "used_iterative": continued_past_one_step,
@@ -1022,8 +958,6 @@ class RightCensoredDensityL2TargetLearner:
             "standard_error": float(init_se_all_eic),
             "estimand_variance_all_eic": float(init_var_all_eic),
             "standard_error_all_eic": float(init_se_all_eic),
-            "estimand_variance_clip_active_filtered": float(init_filtered_var),
-            "standard_error_clip_active_filtered": float(init_filtered_se),
             "gbar_clip": float(self.clip),
             "targeting_gbar_floor": float(targeting_gbar_floor),
             "targeting_gbar_floor_scale": (
@@ -1031,9 +965,7 @@ class RightCensoredDensityL2TargetLearner:
                 if self.targeting_gbar_floor_scale is not None
                 else float("nan")
             ),
-            "clip_active_eic_included_count": int(init_filtered_eic["included_count"]),
-            "clip_active_eic_excluded_count": int(init_filtered_eic["excluded_count"]),
-            "clip_active_eic_excluded_rate": float(init_filtered_eic["excluded_rate"]),
+            "gbar_floor_active": gbar_floor_active,
             "ci_lower": ci_lower,
             "ci_upper": ci_upper,
             "score_at_zero": float(init_state.score_at_zero if final_summary is None else final_summary["score_at_zero"]),
@@ -1057,12 +989,7 @@ class RightCensoredDensityL2TargetLearner:
                 "standard_error": float(init_se_all_eic),
                 "estimand_variance_all_eic": float(init_var_all_eic),
                 "standard_error_all_eic": float(init_se_all_eic),
-                "estimand_variance_clip_active_filtered": float(init_filtered_var),
-                "standard_error_clip_active_filtered": float(init_filtered_se),
                 "targeting_gbar_floor": float(targeting_gbar_floor),
-                "clip_active_eic_included_count": int(init_filtered_eic["included_count"]),
-                "clip_active_eic_excluded_count": int(init_filtered_eic["excluded_count"]),
-                "clip_active_eic_excluded_rate": float(init_filtered_eic["excluded_rate"]),
             },
             "one_step_stage": {
                 "psi": float(one_step_stage["psi_star"]),
@@ -1075,16 +1002,7 @@ class RightCensoredDensityL2TargetLearner:
                 "standard_error": float(one_step_stage["standard_error"]),
                 "estimand_variance_all_eic": float(one_step_stage["estimand_variance_all_eic"]),
                 "standard_error_all_eic": float(one_step_stage["standard_error_all_eic"]),
-                "estimand_variance_clip_active_filtered": float(
-                    one_step_stage["estimand_variance_clip_active_filtered"]
-                ),
-                "standard_error_clip_active_filtered": float(
-                    one_step_stage["standard_error_clip_active_filtered"]
-                ),
                 "targeting_gbar_floor": float(targeting_gbar_floor),
-                "clip_active_eic_included_count": int(one_step_filtered_eic["included_count"]),
-                "clip_active_eic_excluded_count": int(one_step_filtered_eic["excluded_count"]),
-                "clip_active_eic_excluded_rate": float(one_step_filtered_eic["excluded_rate"]),
                 "score_at_zero": float(one_step_stage["score_at_zero"]),
                 "score_at_solution": float(one_step_stage["score_at_solution"]),
                 "status": str(one_step_stage["status"]),
@@ -1100,12 +1018,7 @@ class RightCensoredDensityL2TargetLearner:
                 "standard_error": final_se_all_eic,
                 "estimand_variance_all_eic": final_var_all_eic,
                 "standard_error_all_eic": final_se_all_eic,
-                "estimand_variance_clip_active_filtered": float(final_filtered_var),
-                "standard_error_clip_active_filtered": float(final_filtered_se),
                 "targeting_gbar_floor": float(targeting_gbar_floor),
-                "clip_active_eic_included_count": int(final_filtered_eic["included_count"]),
-                "clip_active_eic_excluded_count": int(final_filtered_eic["excluded_count"]),
-                "clip_active_eic_excluded_rate": float(final_filtered_eic["excluded_rate"]),
             },
             "iteration_history": history_df.to_dict("records") if len(history_df) > 0 else [],
             "epsilon_path": final_epsilon_path,
@@ -1133,12 +1046,7 @@ class RightCensoredDensityL2TargetLearner:
                     "eic_values": final_state.eif_values.copy()
                     if final_state.eif_values is not None
                     else np.empty(0, dtype=float),
-                    "clip_active_eic_mask": final_filtered_eic["positivity_mask"].copy(),
-                    "clip_active_eic_include_mask": final_filtered_eic["include_mask"].copy(),
-                    "observed_gbar": final_filtered_eic["observed_gbar"].copy(),
-                    "direction_grid_clip_active_mask": final_filtered_eic[
-                        "direction_grid_mask"
-                    ].copy(),
+                    "observed_gbar": _raw_gbar(censoring_cache, observed_data["T"].to_numpy(dtype=float)),
                 }
             )
 

@@ -115,7 +115,7 @@ def test_right_censored_density_l2_store_arrays_and_initial_ci_convention():
     assert "raw_direction" in pointwise_fit
     assert "centered_direction" in pointwise_fit
     assert "eic_values" in pointwise_fit
-    assert "clip_active_eic_mask" in pointwise_fit
+    assert "observed_gbar" in pointwise_fit
     density_mass = float(np.sum(pointwise_fit["estimated_density"] * pointwise_fit["delta_j"]))
     assert np.isclose(density_mass, 1.0, atol=1e-6)
 
@@ -125,25 +125,15 @@ def test_right_censored_density_l2_store_arrays_and_initial_ci_convention():
     expected_upper = summary["psi_star"] + 1.96 * summary["standard_error_initial_stage"]
     assert np.isclose(summary["ci_lower"], expected_lower)
     assert np.isclose(summary["ci_upper"], expected_upper)
-    assert int(summary["clip_active_eic_excluded_count"]) > 0
-    assert int(summary["clip_active_eic_included_count"]) + int(
-        summary["clip_active_eic_excluded_count"]
-    ) == len(data)
+    # clip = 0.4 puts the censoring-survival estimate below the floor near the end: the floor is active, and every
+    # observation still enters the SE (the positivity-filtered SE was removed, Yilong 2026-10-25)
+    assert bool(summary["gbar_floor_active"])
+    assert not [c for c in summary.index if "clip_active" in c or "positivity_eic" in c or "filtered" in c]
     eic_values = np.asarray(pointwise_fit["eic_values"], dtype=float)
-    include_mask = np.asarray(pointwise_fit["clip_active_eic_include_mask"], dtype=bool)
     expected_all_eic_se = np.sqrt(np.var(eic_values, ddof=1) / len(eic_values))
-    expected_filtered_se = np.sqrt(np.var(eic_values[include_mask], ddof=1) / include_mask.sum())
     assert np.isclose(summary["standard_error_final"], expected_all_eic_se)
     assert np.isclose(summary["standard_error_all_eic_final"], expected_all_eic_se)
-    assert np.isclose(
-        summary["standard_error_clip_active_filtered_final"],
-        expected_filtered_se,
-    )
     assert np.isclose(summary["estimand_variance_final"], expected_all_eic_se**2)
-    assert np.isclose(
-        summary["estimand_variance_clip_active_filtered_final"],
-        expected_filtered_se**2,
-    )
 
     default_var = right_censored_density_l2_estimand_variance(targeted, observed_data=data)
     initial_var = right_censored_density_l2_estimand_variance(

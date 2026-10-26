@@ -9,7 +9,7 @@ import pandas as pd
 
 from haldensity.rc.estimators import RightCensoredInitEstimator
 from haldensity.rc.km import KaplanMeier, last_time_as_event
-from haldensity.rc.targeting.eic import _compute_exact_survival_eif
+from haldensity.rc.targeting.eic import _compute_exact_survival_eif, _gbar_floor_active
 from haldensity.rc.targeting._common import (
     PointwiseTMLEState,
     RCCensoringCache,
@@ -897,6 +897,9 @@ def right_censored_survival_targeting_M_step_v2(
             n_obs,
             min_score_tol,
         )
+        gbar_floor_active = _gbar_floor_active(
+            _state_to_target_grid(init_state), censoring_cache, targeting_gbar_floor
+        )
         passes_initial_threshold = bool(abs(float(init_state.eif_mean)) <= threshold_initial)
 
         if mode == "auto" and passes_initial_threshold:
@@ -1113,6 +1116,7 @@ def right_censored_survival_targeting_M_step_v2(
                     if targeting_gbar_floor_scale is not None
                     else float("nan")
                 ),
+                "gbar_floor_active": gbar_floor_active,
             }
         )
 
@@ -1149,6 +1153,7 @@ def right_censored_survival_targeting_M_step_v2(
                 if targeting_gbar_floor_scale is not None
                 else float("nan")
             ),
+            "gbar_floor_active": gbar_floor_active,
             "initial_stage": {
                 "psi": float(init_state.psi_current),
                 "eif_mean": float(init_state.eif_mean),

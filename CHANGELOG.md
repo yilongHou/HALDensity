@@ -356,6 +356,16 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   sample), and their default standard errors either used those values (density L2: 2.76 for an estimate of
   1.18) or left out every censored observation (mean, RMST, entropy). **Results change** for such samples,
   and slightly for others through CV training folds whose largest time is censored.
+- **Right-censored targeting reports the SE over all observations** (Yilong, 2026-10-25; rc). The
+  positivity-filtered SE is removed: the default of the mean, RMST and entropy targets, it left out the
+  observations near or beyond the point where the censoring-survival estimate fell below its floor (every
+  censored observation when the largest time was censored), and it divided by the number kept. Its summary
+  columns (`clip_active_eic_*`, `positivity_eic_*`, `estimand_variance_clip_active_filtered*`,
+  `standard_error_clip_active_filtered*`) and stored masks go with it. The floor on the censoring-survival
+  estimate inside the influence curves, max(1/(sqrt(n) log n), clip), stays as a positivity safeguard; the new
+  column `gbar_floor_active` says whether it was active. In the convention check (3,600 replicates of the
+  tutorials' design, n = 200 to 1,000) neither the floor nor the filter triggered once the convention was in.
+  Results where nothing was left out are unchanged (the one-step variances to rounding, 3e-16).
 
 The old behaviour of these fixes is available at `v0.1.0`.
 

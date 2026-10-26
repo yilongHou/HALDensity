@@ -11,7 +11,8 @@ from haldensity.rc.km import KaplanMeier, last_time_as_event
 from haldensity.rc.targeting.eic import (
     _build_unbounded_wald_interval_allow_nan,
     _compute_exact_entropy_eif,
-    _estimate_positivity_filtered_eic_variance,
+    _gbar_floor_active,
+    _raw_gbar,
 )
 from haldensity.rc.targeting._common import (
     RCCensoringCache,
@@ -665,15 +666,11 @@ class RightCensoredEntropyTargetLearner:
             self.min_score_tol,
         )
         passes_initial_threshold = bool(abs(float(init_state.eif_mean)) <= threshold_initial)
-        init_filtered_eic = _estimate_positivity_filtered_eic_variance(
-            eic_values=init_state.eif_values,
-            target_grid=_state_to_target_grid(init_state),
-            censoring_cache=censoring_cache,
-            observed_data=observed_data,
-            clip=targeting_gbar_floor,
+        gbar_floor_active = _gbar_floor_active(
+            _state_to_target_grid(init_state), censoring_cache, targeting_gbar_floor
         )
-        init_var = float(init_filtered_eic["estimand_variance"])
-        init_se = float(init_filtered_eic["standard_error"])
+        init_var = float(init_var_all_eic)
+        init_se = float(init_se_all_eic)
 
         if mode == "auto" and passes_initial_threshold:
             history_df = pd.DataFrame()
@@ -684,7 +681,6 @@ class RightCensoredEntropyTargetLearner:
             final_eif_mean = float(init_state.eif_mean)
             final_var_all_eic = float(init_var_all_eic)
             final_se_all_eic = float(init_se_all_eic)
-            final_filtered_eic = init_filtered_eic
             final_var = float(init_var)
             final_se = float(init_se)
             final_stop_reason = "initial_score_tolerance"
@@ -749,17 +745,8 @@ class RightCensoredEntropyTargetLearner:
                 raise RuntimeError("One-step entropy TMLE state is missing EIC values.")
             one_step_var_all_eic = float(one_step_stage["estimand_variance"])
             one_step_se_all_eic = float(one_step_stage["standard_error"])
-            one_step_filtered_eic = _estimate_positivity_filtered_eic_variance(
-                eic_values=one_step_state.eif_values,
-                target_grid=_state_to_target_grid(one_step_state),
-                censoring_cache=censoring_cache,
-                observed_data=observed_data,
-                clip=targeting_gbar_floor,
-            )
             one_step_stage["estimand_variance_all_eic"] = one_step_var_all_eic
             one_step_stage["standard_error_all_eic"] = one_step_se_all_eic
-            one_step_stage["estimand_variance"] = float(one_step_filtered_eic["estimand_variance"])
-            one_step_stage["standard_error"] = float(one_step_filtered_eic["standard_error"])
             run_full_iterative = mode == "iterative" or mode == "auto"
             if mode == "one_step" or not run_full_iterative:
                 final_bundle = one_step_bundle
@@ -788,15 +775,8 @@ class RightCensoredEntropyTargetLearner:
             final_eif_mean = float(final_summary["eif_mean"])
             final_var_all_eic = float(final_summary["estimand_variance"])
             final_se_all_eic = float(final_summary["standard_error"])
-            final_filtered_eic = _estimate_positivity_filtered_eic_variance(
-                eic_values=final_state.eif_values,
-                target_grid=_state_to_target_grid(final_state),
-                censoring_cache=censoring_cache,
-                observed_data=observed_data,
-                clip=targeting_gbar_floor,
-            )
-            final_var = float(final_filtered_eic["estimand_variance"])
-            final_se = float(final_filtered_eic["standard_error"])
+            final_var = float(final_var_all_eic)
+            final_se = float(final_se_all_eic)
             final_stop_reason = str(final_summary["stop_reason"])
             final_n_iterations = int(final_summary["n_iterations"])
             final_epsilon = float(final_summary["epsilon_last"])
@@ -859,9 +839,7 @@ class RightCensoredEntropyTargetLearner:
                         if self.targeting_gbar_floor_scale is not None
                         else float("nan")
                     ),
-                    "clip_active_eic_included_count": int(init_filtered_eic["included_count"]),
-                    "clip_active_eic_excluded_count": int(init_filtered_eic["excluded_count"]),
-                    "clip_active_eic_excluded_rate": float(init_filtered_eic["excluded_rate"]),
+                    "gbar_floor_active": gbar_floor_active,
                     "ci_lower": ci_lower,
                     "ci_upper": ci_upper,
                     "score_at_zero": float(init_state.score_at_zero if final_summary is None else final_summary["score_at_zero"]),
@@ -926,9 +904,6 @@ class RightCensoredEntropyTargetLearner:
                     "standard_error_final": float(final_se),
                     "estimand_variance_all_eic_final": float(final_var_all_eic),
                     "standard_error_all_eic_final": float(final_se_all_eic),
-                    "clip_active_eic_included_count_final": int(final_filtered_eic["included_count"]),
-                    "clip_active_eic_excluded_count_final": int(final_filtered_eic["excluded_count"]),
-                    "clip_active_eic_excluded_rate_final": float(final_filtered_eic["excluded_rate"]),
                     "epsilon_last": final_epsilon,
                     "continued_past_one_step": continued_past_one_step,
                     "used_iterative": continued_past_one_step,
@@ -960,9 +935,7 @@ class RightCensoredEntropyTargetLearner:
                 if self.targeting_gbar_floor_scale is not None
                 else float("nan")
             ),
-            "clip_active_eic_included_count": int(init_filtered_eic["included_count"]),
-            "clip_active_eic_excluded_count": int(init_filtered_eic["excluded_count"]),
-            "clip_active_eic_excluded_rate": float(init_filtered_eic["excluded_rate"]),
+            "gbar_floor_active": gbar_floor_active,
             "ci_lower": ci_lower,
             "ci_upper": ci_upper,
             "score_at_zero": float(init_state.score_at_zero if final_summary is None else final_summary["score_at_zero"]),
@@ -1040,10 +1013,7 @@ class RightCensoredEntropyTargetLearner:
                     "eic_values": final_state.eif_values.copy()
                     if final_state.eif_values is not None
                     else np.empty(0, dtype=float),
-                    "clip_active_eic_mask": final_filtered_eic["positivity_mask"].copy(),
-                    "clip_active_eic_include_mask": final_filtered_eic["include_mask"].copy(),
-                    "observed_gbar": final_filtered_eic["observed_gbar"].copy(),
-                    "direction_grid_clip_active_mask": final_filtered_eic["direction_grid_mask"].copy(),
+                    "observed_gbar": _raw_gbar(censoring_cache, observed_data["T"].to_numpy(dtype=float)),
                 }
             )
 
