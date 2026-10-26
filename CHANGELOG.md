@@ -385,6 +385,11 @@ The old behaviour of these fixes is available at `v0.1.0`.
 
 ### Fixed
 
+- Memory of the delta-method SE (review C4): E[phi] built the whole basis at every quadrature node (64,064 x
+  1,002 float64 at 1,000 knots), and `density_confidence_interval` built it a second time just for the
+  original fit's density. It is now summed 4,096 nodes at a time and the density needs only log Z: at 1,000
+  selected knots (k = 2, n = 3,000) peak memory 983 MB -> 107 MB in `estimate_covariance_beta` and 992 MB ->
+  105 MB in `density_confidence_interval`, the same time, SEs equal to 1e-10.
 - `estimate_covariance_beta(_ridge_param=...)` without `_inverse="ridge"` was ignored silently once the scaled
   floor became the default (review C3); it now raises a ValueError. `_inverse="ridge"` alone uses the reference
   ridge 1e-6.

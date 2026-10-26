@@ -285,14 +285,32 @@ def _basis(x: Union[pd.DataFrame, np.ndarray], knots: np.ndarray, basis_order: i
     return create_basis_functions(frame, knots, order=basis_order, include_intercept=True)[0]
 
 
+def _expected_basis(points: np.ndarray, mass: np.ndarray, selected_knots: np.ndarray, basis_order: int,
+                    chunk: int = 4096) -> np.ndarray:
+    """sum_q mass_q phi(points_q) over the selected basis, ``chunk`` nodes at a time: the whole node-by-basis
+    matrix was 64,064 x 1,002 float64 (514 MB) at 1,000 knots (review C4)."""
+    expected = np.zeros(basis_order + 1 + selected_knots.size)
+    for lo in range(0, points.size, chunk):
+        expected += mass[lo:lo + chunk] @ _basis(points[lo:lo + chunk], selected_knots, basis_order)
+    return expected
+
+
 def _fitted_expectation(theta_hat_full: np.ndarray, knots: np.ndarray, basis_order: int,
                         support: tuple[float, float] = SUPPORT) -> tuple[float, np.ndarray]:
     """log Z and E[phi] over the selected basis under the fitted density, with the rule of the accurate
     normalizer (Gauss-Legendre with breakpoints at the selected knots; exact for k = 0)."""
     points, weights, result = quadrature_rule(theta_hat_full, knots, basis_order, support)
     mass = weights * np.exp(log_unnormalized_density(points, theta_hat_full, knots, basis_order) - result.log_z)
-    phi = _basis(points, _selected_knots(theta_hat_full, knots, basis_order), basis_order)
-    return result.log_z, mass @ phi
+    selected = _selected_knots(theta_hat_full, knots, basis_order)
+    return result.log_z, _expected_basis(points, mass, selected, basis_order)
+
+
+def _density_at(x_values: np.ndarray, theta_hat_full: np.ndarray, knots: np.ndarray, basis_order: int,
+                support: tuple[float, float] = SUPPORT) -> np.ndarray:
+    """The fitted density at ``x_values`` with the accurate normalizer (log Z only, no E[phi])."""
+    _, _, result = quadrature_rule(theta_hat_full, knots, basis_order, support)
+    log_density = log_unnormalized_density(x_values, theta_hat_full, knots, basis_order) - result.log_z
+    return np.exp(np.clip(log_density, -745.0, 709.0))
 
 
 def _evaluation_pieces(
@@ -364,7 +382,7 @@ def density_confidence_interval(
     x_values = np.clip(x_values, *_support)
     if _cleaning_failed(support_refit):
         warnings.warn(NO_SE_WARNING, UserWarning, stacklevel=2)
-        density_eval = _evaluation_pieces(x_values, original_theta, knots, basis_order, _support)[2]
+        density_eval = _density_at(x_values, original_theta, knots, basis_order, _support)
         nan = np.full(len(x_values), np.nan)
         result_df = pd.DataFrame({'x': x_values, 'density': density_eval, 'se': nan, 'lower': nan, 'upper': nan})
         result_df.attrs.update(basis='cleaned', basis_certified=False, se='none: basis cleaning failed')
@@ -382,7 +400,7 @@ def density_confidence_interval(
         density_eval = density_se_basis
     else:
         # the point estimate stays the original fit; only the SE uses the cleaned basis
-        density_eval = _evaluation_pieces(x_values, original_theta, knots, basis_order, _support)[2]
+        density_eval = _density_at(x_values, original_theta, knots, basis_order, _support)
 
     n_eval = len(x_values)
     standard_errors = np.zeros(n_eval)
