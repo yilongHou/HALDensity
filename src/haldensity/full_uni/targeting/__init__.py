@@ -6,6 +6,14 @@ from haldensity.full_uni.targeting.cdf import (
     cdf_estimand_variance,
     cdf_targeting_M_step,
 )
+from haldensity.full_uni.targeting.density_functionals import (
+    DensityL2TargetLearner,
+    EntropyTargetLearner,
+    density_l2_estimand_variance,
+    density_l2_targeting_M_step,
+    entropy_estimand_variance,
+    entropy_targeting_M_step,
+)
 from haldensity.full_uni.targeting.median import (
     MedianTargetLearner,
     median_estimand_variance,
@@ -27,8 +35,14 @@ __all__ = [
     "TargetingResults",
     "targeting_inputs",
     "CDFTargetLearner",
+    "DensityL2TargetLearner",
+    "EntropyTargetLearner",
     "cdf_estimand_variance",
     "cdf_targeting_M_step",
+    "density_l2_estimand_variance",
+    "density_l2_targeting_M_step",
+    "entropy_estimand_variance",
+    "entropy_targeting_M_step",
     "MedianTargetLearner",
     "median_estimand_variance",
     "median_targeting_M_step",

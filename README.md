@@ -11,7 +11,7 @@ Features
 - Cross-validation and hyperparameter tuning via Optuna
 - Pointwise delta-method intervals for the density (`haldensity.core.variance`), with a standard error that
   does not depend on the data's units
-- Targeted learning (TMLE) for survival, mean, and median
+- Targeted learning (TMLE) for survival, mean, median, entropy and density L2
 - **Censored data support**:
   - Right-censored density estimation via IPCW initialization and the observed-data L1-MLE with censoring-aware tuning; four point estimators with one call each (`haldensity.rc.fit_right_censored`) and targeting (TMLE) for survival, mean, RMST, density L2 and entropy
   - Interval-censored density estimation via midpoint initialization and direct optimization of the observed-data likelihood (FISTA, projected gradient); current-status data through `haldensity.ic.current_status`

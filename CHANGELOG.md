@@ -230,6 +230,21 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   naming the cause: the targeting coefficients reached their L1 bound, which happens when an interval cut by
   the targeting points holds no observation (40 points with two such intervals: the default bound 20 binds and
   the TMLE misses the empirical survival by 6.5e-4; with 100 it is exact). The README states the condition.
+- **Full-data entropy and density-L2 targets** (Yilong, 2026-10-25; full data): `EntropyTargetLearner`
+  (psi = -integral p log p, influence curve -log p(x) - psi) and `DensityL2TargetLearner` (psi = integral p^2,
+  influence curve 2 (p(x) - psi)), with `entropy_targeting_M_step` / `entropy_estimand_variance` and
+  `density_l2_targeting_M_step` / `density_l2_estimand_variance`. As for the other full-data targets: the exact
+  rule, the solve within the L1 bound and the Newton polish, `estimate` and `plug_in`, and the SE from the
+  influence curve under the targeted density. A step's targeting basis is the influence curve's x-part at the
+  density the step starts from. For the entropy one step solves P_n D* = 0 (to 3e-13 in six trials, Beta(2, 3)
+  data, n = 300 and 3,000, k = 0, 1, 2): along p^(1 - alpha) / Z the influence curve is affine in log p. For
+  density L2 one step leaves P_n D* of second order (4e-6 to 1.5e-2 in the same trials); `max_steps` > 1 repeats
+  the step until |P_n D*| <= 1e-10 (3-9 steps there). The results
+  add `theta_targeting_path`, `log_normalizer_path` and `eic_mean_path`; `eic_values` gives D* at any points. New
+  exact functionals `ExactDensity.entropy()` and `.density_l2()`. No cross-fitting yet: its API follows the
+  CV-TMLE study. Internally `BaseTargetLearner.run_m_step` now runs one step from a start log-density
+  (`_targeting_step`) and assembles the results (`_results`); the other targets' results are unchanged, bit for
+  bit (12 fits, 195 outputs).
 - Tutorials per data type in `examples/tutorials/`, using the public API only (Yilong, 2026-10-24):
   `full_uni/01_galaxies`, `full_uni/02_simulated_density`, `full_uni/03_targeting`, `full_multi/01_bivariate`,
   `rc/01_point_estimators` and `rc/02_tmle` (standard errors for survival, the mean and RMST; density L2 and

@@ -1,15 +1,16 @@
 import warnings
+from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 import cvxpy as cp
-from typing import Union, Any, Optional, Sequence
+from typing import Union, Any, Callable, Optional, Sequence
 from pydantic import BaseModel
 from haldensity.core.defaults import DEFAULT_BASIS_ORDER
 from haldensity.core.basis.univariate import create_basis_functions
 from scipy.special import logsumexp
 from haldensity.core.solvers.cvxpy import solve_cvxpy_problem
 from haldensity.core.univariate.normalizer import DEFAULT_MAX_ORDER, log_unnormalized_density
-from haldensity.full_uni.targeting.exact import ExactDensity, cell_edges, converged_rule, log_integral
+from haldensity.full_uni.targeting.exact import ExactDensity, ExactRule, cell_edges, converged_rule, log_integral
 
 # the targeted density's log Z may change by at most this much when the nodes per cell double; otherwise the
 # M-step is solved again on the finer rule
@@ -50,6 +51,23 @@ class TargetingResults(BaseModel):
     score_residual: Optional[float] = None
     solver_used: Optional[str] = None
     solver_status: Optional[str] = None
+    # targets whose influence curve depends on the density (entropy, density L2): one coefficient per step, log Z
+    # of the initial and of each targeted density, and P_n D* after each step
+    theta_targeting_path: Optional[list[float]] = None
+    log_normalizer_path: Optional[list[float]] = None
+    eic_mean_path: Optional[list[float]] = None
+
+
+@dataclass
+class TargetingStep:
+    """One targeting step from a start log-density: its coefficients, the solve, the integration rule, the targeted
+    log-density (up to its constant), the targeted density and the largest score-equation error."""
+    alpha: np.ndarray
+    solve_result: Any
+    rule: ExactRule
+    targeted: Callable[[np.ndarray], np.ndarray]
+    density: ExactDensity
+    score_residual: float
 
 
 def targeting_inputs(fit: Any) -> dict[str, np.ndarray]:
@@ -224,6 +242,15 @@ class BaseTargetLearner:
             ``log_normalizer``, ``integration_order`` and ``score_residual`` (the largest
             |E[b] - P_n b| over the targeting basis; about 1e-12 unless the L1 bound binds).
         """
+        old_theta, hal_knots = self._check_inputs(grid_points_hal_selected, old_theta)
+        # Backward-compat: some learners (e.g., Median) expect underscored keys
+        kwargs = {**kwargs, '_old_theta': old_theta, '_grid_points_hal_selected': hal_knots}
+        fixed = self._hal_log_density(old_theta, hal_knots)
+        step = self._targeting_step(fixed, hal_knots, uncensored_augmented.copy(), kwargs)
+        return self._results(step, fixed, old_theta, grid_points_hal_selected, hal_knots, kwargs)
+
+    def _check_inputs(self, grid_points_hal_selected, old_theta) -> tuple[np.ndarray, np.ndarray]:
+        """(old_theta, knots) as float arrays, after checking they fit together at the learner's order."""
         old_theta = np.asarray(old_theta, dtype=float).ravel()
         hal_knots = np.asarray(grid_points_hal_selected, dtype=float).ravel()
         k = self.basis_order
@@ -235,14 +262,18 @@ class BaseTargetLearner:
                 f"knot. Build both from the fit with haldensity.full_uni.targeting.targeting_inputs(estimator) "
                 f"(get_results()['theta_hat'] also holds the zero coefficients), and give the learner the fit's "
                 f"basis_order.")
-        # Backward-compat: some learners (e.g., Median) expect underscored keys
-        kwargs = {**kwargs, '_old_theta': old_theta, '_grid_points_hal_selected': hal_knots}
+        return old_theta, hal_knots
 
+    def _hal_log_density(self, old_theta: np.ndarray, hal_knots: np.ndarray) -> Callable[[np.ndarray], np.ndarray]:
         def fixed(x: np.ndarray) -> np.ndarray:
             """The initial fit's log-density up to its constant: intercept, powers and selected knots."""
-            return log_unnormalized_density(x, old_theta, hal_knots, k)
+            return log_unnormalized_density(x, old_theta, hal_knots, self.basis_order)
+        return fixed
 
-        uncensored_data = uncensored_augmented.copy()
+    def _targeting_step(self, fixed: Callable[[np.ndarray], np.ndarray], hal_knots: np.ndarray,
+                        uncensored_data: pd.DataFrame, kwargs: dict) -> TargetingStep:
+        """One targeting step from the log-density ``fixed`` (up to its constant): the coefficients of the
+        targeting basis that maximize the likelihood within the L1 bound, on the exact rule."""
         n_samples = len(uncensored_data)
         fixed_data = fixed(uncensored_data['W1'].to_numpy(dtype=float))
         b_ik_targeting = np.asarray(self.get_b_ik_targeting(uncensored_data, **kwargs), dtype=float)
@@ -279,22 +310,28 @@ class BaseTargetLearner:
                       "between two consecutive points or above the last) holds no observation, so the targeted "
                       "density must put almost no mass there" if at_bound else "the solver stopped early")
             warnings.warn(f"The targeting step's score equations hold only to {score_residual:.1e}, so the estimate "
-                          f"is not the exact TMLE: {reason}.", UserWarning, stacklevel=2)
-        estimate, density_at_estimate = self.target_values(targeted_density, **kwargs)
-        plug_in, _ = self.target_values(ExactDensity(fixed, rule), **kwargs)
+                          f"is not the exact TMLE: {reason}.", UserWarning, stacklevel=3)
+        return TargetingStep(theta_targeting, solve_result, rule, targeted, targeted_density, score_residual)
+
+    def _results(self, step: TargetingStep, fixed: Callable[[np.ndarray], np.ndarray], old_theta: np.ndarray,
+                 grid_points_hal_selected, hal_knots: np.ndarray, kwargs: dict) -> dict[str, Any]:
+        """run_m_step's results from its (last) step; ``fixed`` is the initial fit, for the plug-in."""
+        estimate, density_at_estimate = self.target_values(step.density, **kwargs)
+        plug_in, _ = self.target_values(ExactDensity(fixed, step.rule), **kwargs)
 
         # the targeted density on a fine grid (for plots), normalized exactly
         grid_eval_full = np.unique(np.concatenate((np.linspace(0, 1, 2001), hal_knots[hal_knots >= 0])))
         grid_midpoints_full = (grid_eval_full[:-1] + grid_eval_full[1:]) / 2
         data_grid_full = pd.DataFrame({'W1': grid_midpoints_full})
-        b_jk_full, _ = create_basis_functions(data_grid_full, hal_knots, order=k, include_intercept=False)
+        b_jk_full, _ = create_basis_functions(data_grid_full, hal_knots, order=self.basis_order,
+                                              include_intercept=False)
 
         return {
             "old_theta": old_theta,               # fixed intercept and hal-basis coefficients
-            "theta_targeting": theta_targeting,     # newly optimized targeting coefficients
+            "theta_targeting": step.alpha,          # newly optimized targeting coefficients
             "theta_intercept": old_theta[0],
             "theta_selected": old_theta[1:],
-            "estimated_density": targeted_density.density(grid_midpoints_full),
+            "estimated_density": step.density.density(grid_midpoints_full),
             "grid_midpoints": grid_midpoints_full,
             "grid_points_hal_selected": grid_points_hal_selected,
             "b_jk": b_jk_full,
@@ -304,11 +341,11 @@ class BaseTargetLearner:
             "estimate": np.asarray(estimate, dtype=float),
             "plug_in": np.asarray(plug_in, dtype=float),
             "density_at_estimate": None if density_at_estimate is None else np.asarray(density_at_estimate, dtype=float),
-            "log_normalizer": targeted_density.log_z,
-            "integration_order": rule.order,
-            "solver_used": solve_result.solver_used,
-            "solver_status": solve_result.status,
-            "score_residual": score_residual,
+            "log_normalizer": step.density.log_z,
+            "integration_order": step.rule.order,
+            "solver_used": step.solve_result.solver_used,
+            "solver_status": step.solve_result.status,
+            "score_residual": step.score_residual,
         }
 
     def get_estimand_variance(self, targeted_fit: dict[str, Any], uncensored_data: pd.DataFrame, **kwargs) -> Union[float, np.ndarray]:
@@ -352,4 +389,7 @@ class BaseTargetLearner:
             score_residual=None if results.get("score_residual") is None else float(results["score_residual"]),
             solver_used=None if results.get("solver_used") is None else str(results["solver_used"]),
             solver_status=None if results.get("solver_status") is None else str(results["solver_status"]),
+            theta_targeting_path=as_list(results.get("theta_targeting_path")),
+            log_normalizer_path=as_list(results.get("log_normalizer_path")),
+            eic_mean_path=as_list(results.get("eic_mean_path")),
         )

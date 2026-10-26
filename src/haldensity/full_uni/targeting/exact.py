@@ -79,7 +79,8 @@ class ExactDensity:
         self.log_density = log_density
         self.rule = rule
         self.log_z = log_integral(log_density, rule)
-        self._mass = rule.weights * np.exp(log_density(rule.points) - self.log_z)
+        self._log_p = log_density(rule.points) - self.log_z            # log p at the nodes
+        self._mass = rule.weights * np.exp(self._log_p)
         self._cumulative = np.concatenate(([0.0], np.cumsum(self._mass.reshape(-1, rule.order).sum(axis=1))))
 
     def density(self, x: np.ndarray) -> np.ndarray:
@@ -109,6 +110,14 @@ class ExactDensity:
 
     def moment(self, power: int) -> float:
         return float(self._mass @ self.rule.points ** power)
+
+    def entropy(self) -> float:
+        """-E[log p(X)] = -integral of p log p."""
+        return float(-(self._mass @ self._log_p))
+
+    def density_l2(self) -> float:
+        """E[p(X)] = integral of p^2."""
+        return float(self._mass @ np.exp(self._log_p))
 
     def quantile(self, probability: float = 0.5) -> float:
         cell = int(np.clip(np.searchsorted(self._cumulative, probability, side="left") - 1, 0, self.rule.edges.size - 2))
