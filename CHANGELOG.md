@@ -225,8 +225,9 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
 - `OptunaHyperparameterTuner(estimator_kwargs=...)` and `best_estimator_params`.
 - CI: the test suite on Python 3.11 for pushes and pull requests.
 - Tutorials per data type in `examples/tutorials/`, using the public API only (Yilong, 2026-10-24):
-  `full_uni/01_galaxies`, `full_uni/02_simulated_density`, `full_uni/03_targeting`, `full_multi/01_bivariate`
-  and `rc/01_point_estimators`. CI runs them with nbmake (`pytest --nbmake examples/tutorials`, without MOSEK;
+  `full_uni/01_galaxies`, `full_uni/02_simulated_density`, `full_uni/03_targeting`, `full_multi/01_bivariate`,
+  `rc/01_point_estimators` and `rc/02_tmle` (standard errors for survival, the mean and RMST; density L2 and
+  entropy without, as their SEs were too small in a simulation, Yilong 2026-10-25). CI runs them with nbmake (`pytest --nbmake examples/tutorials`, without MOSEK;
   nbmake joins the `dev` extra). The saved outputs come from a run with MOSEK.
 - From the consolidated development branch: right-censored observed-data L1-MLE, its CV tuner
   and fit object; right-censored targeting (survival, mean, density L2, RMST, entropy) and EIF
@@ -403,6 +404,9 @@ The old behaviour of these fixes is available at `v0.1.0`.
   and `example_right_censored_fit_object.ipynb`; `example_full_data_case_study.ipynb` (in `v0.1.0`; its copy
   with the bootstrap is in the paper repository HAL-MLE-DE-AOS, `from_haldensity/examples/`) and
   `examples/plotting.py` (in `v0.1.0`; each tutorial draws its own plots).
+- `examples/HAL-TMLE-RC/` (not in `v0.1.0`): its right-censored targeting demos are replaced by
+  `rc/02_tmle`; the whole folder, with the research notebooks and notes, is in HAL_TMLE_RC
+  (`from_haldensity/examples/HAL-TMLE-RC/`, copied from 6001abe, every file identical).
 - Right-censored comparison helpers (truth objects, error metrics, M1–M4 experiment runner,
   two simulators) and the plug-in pipelines `fit_right_censored_cv_ipcw_l1mle_plugin` /
   `..._undersmoothed_plugin`; moved to the HAL_TMLE_RC project repository and replaced by

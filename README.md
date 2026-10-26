@@ -182,6 +182,8 @@ Tutorials per data type, in `examples/tutorials/`. They use the public API and r
 - `full_multi/01_bivariate.ipynb`: the multivariate estimator (experimental) on a bivariate sample
 - `rc/01_point_estimators.ipynb`: right-censored data: the four HAL point estimators and the fitted
   distribution
+- `rc/02_tmle.ipynb`: right-censored data: targeted estimates (HAL-TMLE) of survival, the mean and the
+  restricted mean survival time with influence-curve standard errors; density L2 and entropy
 
 The notebooks directly in `examples/` predate 0.2.0 and use its old import paths:
 
