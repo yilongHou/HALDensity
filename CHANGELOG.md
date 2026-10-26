@@ -288,6 +288,7 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   at t = 0.0667, where the density is about 73, missed the empirical survival by 0.012). The integrals now use
   cells with edges at the knots and at the points where the targeting basis jumps (the targeting points, or the
   initial fit's median), with Gauss-Legendre inside each cell, doubled until log Z changes by less than 1e-12
+  for the initial fit and 1e-10 for the targeted density
   (`haldensity.full_uni.targeting.exact`). After the solver, a few Newton steps on the targeting coefficients
   (while the L1 bound is not binding) bring the score equations to about 1e-12. `run_m_step` also returns the
   exact values: `estimate` (the TMLE), `plug_in` (the initial fit's value), `density_at_estimate` (median),

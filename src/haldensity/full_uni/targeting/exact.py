@@ -3,7 +3,8 @@
 The targeting step integrates over cells whose edges are the HAL knots and the points where the targeting basis
 jumps (the targeting points, or the median). Inside a cell the log-density is a polynomial plus a smooth or
 constant targeting term, so Gauss-Legendre per cell converges fast; the number of nodes per cell is doubled until
-log Z changes by less than 1e-12, as the accurate normalizer does
+log Z changes by less than 1e-12, as the accurate normalizer does (for the targeted density, after the M-step's
+solve, until it changes by less than 1e-10: ``base.TARGETED_RULE_TOL``)
 (:mod:`haldensity.core.univariate.normalizer`). The same rule gives the functionals of a fitted density exactly:
 cumulative probabilities (whole cells, plus Gauss-Legendre on the part of a cell), moments and quantiles. Before
 0.2.0 the step summed over a 5e-4 grid, so the score equations held at the nearest grid cell instead of the
