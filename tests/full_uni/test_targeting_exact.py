@@ -78,3 +78,22 @@ def test_a_fit_without_exact_estimates_falls_back_with_a_warning():
     old = {key: value for key, value in surv.items() if key != "estimate"}
     with pytest.warns(UserWarning, match="no exact 'estimate'"):
         survival_estimand_variance(targeted_fit=old, uncensored_data=data, targeting_points=TARGETS)
+
+
+def test_targeting_works_when_the_fit_selects_no_knots():
+    # review T3: a k = 0 fit with no selected knots crashed in the M-step (an empty basis); its TMLEs are still exact
+    import pandas as pd
+
+    from haldensity.full_uni import CVXPYEstimator
+    from haldensity.full_uni.targeting import MomentsTargetLearner, SurvivalTargetLearner, targeting_inputs
+
+    data = pd.DataFrame({"W1": np.random.default_rng(0).beta(2, 5, 100)})
+    inputs = targeting_inputs(CVXPYEstimator(norm_constraint=1e-6, basis_order=0).fit(data))
+    assert inputs["grid_points_hal_selected"].size == 0
+    x = data["W1"].to_numpy()
+    survival = SurvivalTargetLearner(norm_constraint=100, basis_order=0).run_m_step(
+        uncensored_augmented=data, **inputs, targeting_points=np.array([0.3]))
+    mean = MomentsTargetLearner(norm_constraint=100, basis_order=0).run_m_step(
+        uncensored_augmented=data, **inputs, x_moment=1)
+    np.testing.assert_allclose(survival["estimate"], [np.mean(x > 0.3)], atol=1e-12)
+    np.testing.assert_allclose(mean["estimate"], [x.mean()], atol=1e-12)

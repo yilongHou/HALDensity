@@ -380,6 +380,8 @@ The old behaviour of these fixes is available at `v0.1.0`.
 
 ### Fixed
 
+- Full-data targeting crashed for an order-0 fit with no selected knots (review T3; older code):
+  `create_basis_functions` with no columns now returns an (n, 0) matrix instead of failing in `np.column_stack`.
 - Full-data targeting variances (review T2 and T4; older code): the influence curve of S(t) = P(X > t) used
   I(x >= t) and that of F(t) = P(X <= t) used I(x < t), so an observation exactly at t counted on the wrong
   side; and both functions failed with a TypeError when `targeting_points` was a Python list. They now use

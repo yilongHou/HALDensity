@@ -58,6 +58,7 @@ def create_basis_functions(
             basis_list.append((np.maximum(x - knot, 0) ** order).astype(np.float64))
             basis_names.append(f"(x - {knot:.6f})_+^{order}")
     
-    basis_array = np.column_stack(basis_list)
+    # no columns (order 0, no knots, no intercept): an (n, 0) matrix, not an error
+    basis_array = np.column_stack(basis_list) if basis_list else np.empty((n, 0), dtype=np.float64)
     return basis_array, basis_names
 
