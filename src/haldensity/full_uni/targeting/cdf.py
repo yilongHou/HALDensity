@@ -5,7 +5,6 @@ from haldensity.core.defaults import DEFAULT_BASIS_ORDER
 from haldensity.full_uni.targeting.base import BaseTargetLearner
 from haldensity.full_uni.targeting.exact import ExactDensity
 from haldensity.full_uni.targeting.cdf_basis import create_targeting_basis_functions
-from haldensity.core.basis.univariate import create_basis_functions
 from haldensity.core.univariate.functionals import generic_compute_cdf_from_density
 
 
@@ -174,21 +173,14 @@ class CDFTargetLearner(BaseTargetLearner):
             cdf, grid_cdf = _compute_cdf_from_density(targeted_fit)
             cdf_targeting = np.interp(targeting_points, grid_cdf, cdf, left=0.0, right=1.0)
         
-        # Step 3: Build the targeting basis for the data (I(x < t) terms)
-        # Note: We use order=0 to get step function indicators as in research code
-        # For CDF we need cumulative indicators going in the opposite direction from survival
-        basis_array, _ = create_basis_functions(uncensored_data, targeting_points, order=0, include_intercept=False)
-        b_ik_targeting = basis_array  # shape: (n_data, n_targeting_points)
-        
-        # Convert survival indicators to CDF indicators: I(x < t) = 1 - I(x >= t)
-        b_ik_targeting = 1.0 - b_ik_targeting
-        
-        # Ensure proper dimensionality
-        if b_ik_targeting.ndim == 1:
-            b_ik_targeting = b_ik_targeting[:, None]
+        # Step 3: the indicators I(x <= t) at the data (F(t) = P(X <= t), so a tie x = t counts; 1 minus the
+        # order-0 basis gave I(x < t)); any sequence of points works
+        points = np.atleast_1d(np.asarray(targeting_points, dtype=float))
+        x = np.asarray(uncensored_data["W1"], dtype=float)
+        b_ik_targeting = (x[:, None] <= points[None, :]).astype(float)
         
         # Step 4: Construct EIC matrix
-        # EIC = I(x < t) - F(t) for each targeting point t
+        # EIC = I(x <= t) - F(t) for each targeting point t
         EIC_matrix = b_ik_targeting - cdf_targeting[None, :]  # Broadcasting: (n_data, n_targeting_points)
         
         # Step 5: Compute variance as sample variance of EIC divided by n

@@ -5,7 +5,6 @@ from haldensity.core.defaults import DEFAULT_BASIS_ORDER
 from haldensity.full_uni.targeting.base import BaseTargetLearner
 from haldensity.full_uni.targeting.exact import ExactDensity
 from haldensity.full_uni.targeting.survival_basis import create_targeting_basis_functions
-from haldensity.core.basis.univariate import create_basis_functions
 from haldensity.core.univariate.functionals import generic_compute_survival_from_density
 
 
@@ -179,14 +178,11 @@ class SurvivalTargetLearner(BaseTargetLearner):
             survival, grid_surv = _compute_survival_from_density(targeted_fit)
             survival_targeting = np.interp(targeting_points, grid_surv, survival, left=1.0, right=0.0)
         
-        # Step 3: Build the targeting basis for the data (I(x > t) terms)
-        # Note: We use order=0 to get step function indicators as in research code
-        basis_tensor, _ = create_basis_functions(uncensored_data, targeting_points, order=0, include_intercept=False)
-        b_ik_targeting = basis_tensor  # numpy array
-        
-        # Ensure proper dimensionality
-        if b_ik_targeting.ndim == 1:
-            b_ik_targeting = b_ik_targeting[:, None]
+        # Step 3: the indicators I(x > t) at the data (strict: a tie x = t is not a survival past t; the order-0
+        # basis is I(x >= t)); any sequence of points works
+        points = np.atleast_1d(np.asarray(targeting_points, dtype=float))
+        x = np.asarray(uncensored_data["W1"], dtype=float)
+        b_ik_targeting = (x[:, None] > points[None, :]).astype(float)
         
         # Step 4: Construct EIC matrix
         # EIC = I(x > t) - S(t) for each targeting point t

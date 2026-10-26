@@ -380,6 +380,10 @@ The old behaviour of these fixes is available at `v0.1.0`.
 
 ### Fixed
 
+- Full-data targeting variances (review T2 and T4; older code): the influence curve of S(t) = P(X > t) used
+  I(x >= t) and that of F(t) = P(X <= t) used I(x < t), so an observation exactly at t counted on the wrong
+  side; and both functions failed with a TypeError when `targeting_points` was a Python list. They now use
+  I(x > t) and I(x <= t) directly and accept any sequence of points.
 - **Right-censored influence curves: the censoring term is the jump of 1/G** (review R1, Yilong 2026-10-25;
   rc; older code). Each censoring jump u contributed E[phi(T*) | T* > u] dG(u) / G(u)^2; the discrete IPCW
   mapping needs dG(u) / (G(u-) G(u)), the jump of 1/G at u. The two differ most at the end of follow-up, where
