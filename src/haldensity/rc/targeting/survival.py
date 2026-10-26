@@ -9,6 +9,8 @@ import pandas as pd
 
 from haldensity.rc.estimators import RightCensoredInitEstimator
 from haldensity.rc.km import KaplanMeier, last_time_as_event
+from haldensity.core.crossfit import resolve_cross_fit
+from haldensity.rc.targeting.crossfit import run_cross_fitted, survival_spec
 from haldensity.rc.targeting.eic import _compute_exact_survival_eif, _gbar_floor_active
 from haldensity.rc.targeting._common import (
     PointwiseTMLEState,
@@ -671,6 +673,7 @@ class RightCensoredSurvivalTargetLearner:
         *,
         km: Optional[KaplanMeier] = None,
         store_pointwise_arrays: Optional[bool] = None,
+        cross_fit: Union[str, bool] = "tuner",
     ) -> dict[str, Any]:
         if not isinstance(observed_data, pd.DataFrame):
             raise TypeError("observed_data must be a pandas DataFrame.")
@@ -678,6 +681,17 @@ class RightCensoredSurvivalTargetLearner:
         missing = required_cols.difference(observed_data.columns)
         if missing:
             raise ValueError(f"observed_data is missing required columns: {sorted(missing)}")
+        cross_fit = resolve_cross_fit(cross_fit)
+        if cross_fit != "none":                      # haldensity.rc.targeting.crossfit; v1: one step, no floor
+            points = _normalize_targeting_points(targeting_points)
+            result = run_cross_fitted(
+                [survival_spec(t0, self.survival_clip) for t0 in points], initial_estimator, observed_data,
+                cross_fit=cross_fit, mode="one_step", clip=self.clip, survival_clip=self.survival_clip,
+                use_floor=False, eps_bracket_start=self.eps_bracket_start,
+                eps_bracket_growth=self.eps_bracket_growth, eps_bracket_max=self.eps_bracket_max,
+                eps_fallback_bounds=self.eps_fallback_bounds, api_version="survival_v1_cross_fitted")
+            result["targeting_points"] = points
+            return result
         observed_data = last_time_as_event(observed_data)
 
         targeting_points_arr = _normalize_targeting_points(targeting_points)
@@ -805,6 +819,7 @@ def right_censored_survival_targeting_M_step(
     eps_bracket_max: float = 16.0,
     eps_fallback_bounds: tuple[float, float] = (-20.0, 20.0),
     store_pointwise_arrays: bool = False,
+    cross_fit: Union[str, bool] = "tuner",
 ) -> dict[str, Any]:
     learner = RightCensoredSurvivalTargetLearner(
         clip=clip,
@@ -820,6 +835,7 @@ def right_censored_survival_targeting_M_step(
         observed_data=observed_data,
         targeting_points=targeting_points,
         km=km,
+        cross_fit=cross_fit,
     )
 
 
@@ -858,6 +874,7 @@ def right_censored_survival_targeting_M_step_v2(
     min_score_tol: float = 1e-8,
     store_pointwise_arrays: bool = False,
     targeting_gbar_floor_scale: Optional[float] = 1.0,
+    cross_fit: Union[str, bool] = "tuner",
 ) -> dict[str, Any]:
     if mode not in {"auto", "one_step", "iterative"}:
         raise ValueError("mode must be one of {'auto', 'one_step', 'iterative'}.")
@@ -867,6 +884,18 @@ def right_censored_survival_targeting_M_step_v2(
     missing = required_cols.difference(observed_data.columns)
     if missing:
         raise ValueError(f"observed_data is missing required columns: {sorted(missing)}")
+    cross_fit = resolve_cross_fit(cross_fit)
+    if cross_fit != "none":                          # haldensity.rc.targeting.crossfit
+        points = _normalize_targeting_points(targeting_points)
+        result = run_cross_fitted(
+            [survival_spec(t0, survival_clip) for t0 in points], initial_estimator, observed_data,
+            cross_fit=cross_fit, mode=mode, clip=clip, survival_clip=survival_clip,
+            targeting_gbar_floor_scale=targeting_gbar_floor_scale, max_iter=max_iter, min_abs_eps=min_abs_eps,
+            min_score_tol=min_score_tol, eps_bracket_start=eps_bracket_start,
+            eps_bracket_growth=eps_bracket_growth, eps_bracket_max=eps_bracket_max,
+            eps_fallback_bounds=eps_fallback_bounds, api_version="survival_v2_cross_fitted")
+        result["targeting_points"] = points
+        return result
     observed_data = last_time_as_event(observed_data)
 
     requested_mode = mode

@@ -66,6 +66,7 @@ def test_right_censored_rmst_targeting_exports_and_shape():
     assert isinstance(learner, RightCensoredRMSTTargetLearner)
 
     targeted = right_censored_rmst_targeting_M_step(
+        cross_fit="none",
         initial_estimator=estimator,
         observed_data=data,
         targeting_points=np.array([0.25, 0.5, 1.0]),
@@ -196,6 +197,7 @@ def test_right_censored_rmst_auto_gate_can_skip_initial_targeting():
     estimator, km = _fit_initial_estimator(data)
 
     targeted = right_censored_rmst_targeting_M_step(
+        cross_fit="none",
         initial_estimator=estimator,
         observed_data=data,
         targeting_points=np.array([0.3, 0.6]),

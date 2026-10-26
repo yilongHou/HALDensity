@@ -67,7 +67,7 @@ def test_mean_targeting_uses_every_observation_when_the_largest_time_is_censored
     events = flipped["Delta"].to_numpy() == 1
     initial = RightCensoredInitEstimator(norm_constraint=30.0, basis_order=1).fit(
         pd.DataFrame({"W1": flipped["T"].to_numpy()[events]}), sample_weights=weights[events])
-    summary = right_censored_mean_targeting_M_step(initial_estimator=initial, observed_data=data, km=km)["summary"]
+    summary = right_censored_mean_targeting_M_step(cross_fit="none", initial_estimator=initial, observed_data=data, km=km)["summary"]
     row = summary.iloc[0]
     assert not row["gbar_floor_active"]  # the censoring survival stays above the floor
     assert row["standard_error"] == pytest.approx(row["standard_error_all_eic"], rel=1e-12)

@@ -66,6 +66,7 @@ def test_right_censored_density_l2_targeting_exports_and_shape():
     assert isinstance(learner, RightCensoredDensityL2TargetLearner)
 
     targeted = right_censored_density_l2_targeting_M_step(
+        cross_fit="none",
         initial_estimator=estimator,
         observed_data=data,
         km=km,
@@ -101,6 +102,7 @@ def test_right_censored_density_l2_store_arrays_and_initial_ci_convention():
     estimator, km = _fit_initial_estimator(data)
 
     targeted = right_censored_density_l2_targeting_M_step(
+        cross_fit="none",
         initial_estimator=estimator,
         observed_data=data,
         km=km,
@@ -285,6 +287,7 @@ def test_density_l2_one_step_matches_iterative_with_one_iteration():
     estimator, km = _fit_initial_estimator(data)
 
     one_step = right_censored_density_l2_targeting_M_step(
+        cross_fit="none",
         initial_estimator=estimator,
         observed_data=data,
         km=km,
@@ -292,6 +295,7 @@ def test_density_l2_one_step_matches_iterative_with_one_iteration():
         store_pointwise_arrays=False,
     )
     iterative_one = right_censored_density_l2_targeting_M_step(
+        cross_fit="none",
         initial_estimator=estimator,
         observed_data=data,
         km=km,
@@ -312,6 +316,7 @@ def test_density_l2_auto_gate_can_stop_after_one_step():
     estimator, km = _fit_initial_estimator(data)
 
     targeted = right_censored_density_l2_targeting_M_step(
+        cross_fit="none",
         initial_estimator=estimator,
         observed_data=data,
         km=km,

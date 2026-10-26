@@ -66,6 +66,7 @@ def test_right_censored_entropy_targeting_exports_and_shape():
     assert isinstance(learner, RightCensoredEntropyTargetLearner)
 
     targeted = right_censored_entropy_targeting_M_step(
+        cross_fit="none",
         initial_estimator=estimator,
         observed_data=data,
         km=km,
@@ -180,6 +181,7 @@ def test_right_censored_entropy_auto_gate_can_skip_initial_targeting():
     estimator, km = _fit_initial_estimator(data)
 
     targeted = right_censored_entropy_targeting_M_step(
+        cross_fit="none",
         initial_estimator=estimator,
         observed_data=data,
         km=km,

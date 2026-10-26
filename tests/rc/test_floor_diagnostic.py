@@ -23,12 +23,12 @@ def _setup():
 def test_the_floor_is_active_only_where_the_influence_curve_reaches():
     common = _setup()
     points = np.array([0.3, 0.8])
-    v1 = T.right_censored_survival_targeting_M_step(targeting_points=points, **common)["summary"]
-    v2 = T.right_censored_survival_targeting_M_step_v2(targeting_points=points, **common)["summary"]
+    v1 = T.right_censored_survival_targeting_M_step(cross_fit="none", targeting_points=points, **common)["summary"]
+    v2 = T.right_censored_survival_targeting_M_step_v2(cross_fit="none", targeting_points=points, **common)["summary"]
     assert v1["gbar_floor_active"].tolist() == [False, True]     # survival v1 now reports it too (R4)
     assert v2["gbar_floor_active"].tolist() == [False, True]
     for tau, active in ((0.3, False), (0.8, True)):
-        rmst = T.right_censored_rmst_targeting_M_step(targeting_points=[tau], **common)["summary"]
+        rmst = T.right_censored_rmst_targeting_M_step(cross_fit="none", targeting_points=[tau], **common)["summary"]
         assert bool(rmst["gbar_floor_active"].iloc[0]) is active
-    mean = T.right_censored_mean_targeting_M_step(**common)["summary"]
+    mean = T.right_censored_mean_targeting_M_step(cross_fit="none", **common)["summary"]
     assert bool(mean["gbar_floor_active"].iloc[0])                 # the mean's curve uses the whole range

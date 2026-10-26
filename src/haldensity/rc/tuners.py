@@ -15,6 +15,7 @@ import pandas as pd
 import optuna
 from sklearn.model_selection import KFold
 
+from haldensity.core.crossfit import FoldFits, data_key
 from haldensity.core.defaults import EM_DEFAULTS, TUNER_DEFAULTS
 from haldensity.rc.estimators import RightCensoredInitEstimator, RightCensoredEMStage
 from haldensity.rc.fit import RightCensoredHALFit
@@ -1140,17 +1141,19 @@ class RightCensoredObservedL1Tuner:
         self.path_anchor_factor_, _, _ = self._build_path_sequence(self.path_factors_)
 
         fold_path_frames: list[pd.DataFrame] = []
+        fold_estimators: list[dict[float, RightCensoredObservedL1MLE]] = []
         for fold_idx, (train_idx, val_idx) in enumerate(self._fold_splits):
             train_df = self.data.iloc[train_idx].reset_index(drop=True)
             val_df = self.data.iloc[val_idx].reset_index(drop=True)
             warm_start = self._get_fold_warm_start_theta(fold_idx, train_df)
-            fold_path_df, _ = self._evaluate_factor_path(
+            fold_path_df, estimators_by_factor = self._evaluate_factor_path(
                 train_df,
                 warm_start_theta=warm_start,
                 score_df=val_df,
                 fold_idx=fold_idx,
             )
             fold_path_frames.append(fold_path_df)
+            fold_estimators.append(estimators_by_factor)
 
         cv_fold_df = (
             pd.concat(fold_path_frames, ignore_index=True)
@@ -1189,6 +1192,15 @@ class RightCensoredObservedL1Tuner:
             raise RuntimeError("Failed to recover the selected full-data CVL1MLE estimator")
         estimator = full_estimators[selected_factor]
         self.estimator_ = estimator
+        # the fold fits at the chosen bound, for cross-fitted targeting (cross_fit="tuner"); none if a fold failed
+        if all(selected_factor in by_factor for by_factor in fold_estimators):
+            estimator.fold_fits_ = FoldFits(
+                splits=[(train.copy(), validation.copy()) for train, validation in self._fold_splits],
+                estimators=[by_factor[selected_factor] for by_factor in fold_estimators],
+                source="tuner",
+                data_key=data_key(self.data[self.time_col].to_numpy(), self.data[self.delta_col].to_numpy()),
+                details={"norm_constraint_factor": selected_factor},
+            )
 
         metadata = {
             "best_metric_value": self.best_metric_value,

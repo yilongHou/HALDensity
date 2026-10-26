@@ -221,6 +221,7 @@ def _select_undersmoothed(
     frames = []
     for factor, estimator in sorted(estimators.items()):
         targeted = right_censored_survival_targeting_M_step_v2(
+            cross_fit="none",                       # the EIF rule picks the bound from the full-sample step
             initial_estimator=estimator,
             observed_data=observed_data,
             targeting_points=points,
@@ -372,6 +373,15 @@ def fit_right_censored(
     runtime[method] = float(time.perf_counter() - tic)
     runtime["total"] = runtime["stage1"] + runtime[method]
     details.update({"estimators": estimators, "runtime_seconds": runtime})
+    # how each estimator was made, for cross-fitted targeting: "refit" repeats Stage 1 at (k, M1) and the bound on
+    # each training fold, "nested" repeats this whole call there
+    recipe = dict(method=method, cv_folds=int(cv_folds), n_trials=int(n_trials), random_state=int(random_state),
+                  n_grid_points=int(n_grid_points), stage1_param_overrides=stage1_param_overrides,
+                  stage1_tuner_kwargs=stage1_tuner_kwargs, norm_constraint_factors=norm_constraint_factors,
+                  l1_kwargs=l1_kwargs, targeting_kwargs=targeting_kwargs)
+    for factor, estimator in estimators.items():
+        estimator.rc_pipeline_ = {"recipe": recipe, "stage1": stage1, "norm_factor": float(factor),
+                                  "targeting_points": points.copy()}
 
     survival = np.empty(points.size)
     density = np.empty(points.size)

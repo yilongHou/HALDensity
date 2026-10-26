@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import numpy as np
 import pandas as pd
 
 from haldensity.rc.estimators import RightCensoredInitEstimator
 from haldensity.rc.km import KaplanMeier, last_time_as_event
+from haldensity.core.crossfit import resolve_cross_fit
+from haldensity.rc.targeting.crossfit import entropy_spec, run_cross_fitted
 from haldensity.rc.targeting.eic import (
     _censoring_jump_weights,
     _build_unbounded_wald_interval_allow_nan,
@@ -623,10 +625,21 @@ class RightCensoredEntropyTargetLearner:
         km: Optional[KaplanMeier] = None,
         mode: str = "iterative",
         store_pointwise_arrays: Optional[bool] = None,
+        cross_fit: Union[str, bool] = "tuner",
     ) -> dict[str, Any]:
         if mode not in {"auto", "one_step", "iterative"}:
             raise ValueError("mode must be one of {'auto', 'one_step', 'iterative'}.")
         _validate_observed_data(observed_data)
+        cross_fit = resolve_cross_fit(cross_fit)
+        if cross_fit != "none":                      # haldensity.rc.targeting.crossfit
+            return run_cross_fitted(
+                [entropy_spec(self.survival_clip)], initial_estimator, observed_data, cross_fit=cross_fit,
+                mode=mode, clip=self.clip, survival_clip=self.survival_clip,
+                targeting_gbar_floor_scale=self.targeting_gbar_floor_scale, max_iter=self.max_iter,
+                min_abs_eps=self.min_abs_eps, min_score_tol=self.min_score_tol,
+                eps_bracket_start=self.eps_bracket_start, eps_bracket_growth=self.eps_bracket_growth,
+                eps_bracket_max=self.eps_bracket_max, eps_fallback_bounds=self.eps_fallback_bounds,
+                api_version="entropy_cross_fitted")
         observed_data = last_time_as_event(observed_data)
         if km is None:
             km = KaplanMeier().fit(observed_data, time_col="T", delta_col="Delta")
@@ -1072,6 +1085,7 @@ def right_censored_entropy_targeting_M_step(
     min_score_tol: float = 1e-8,
     store_pointwise_arrays: bool = False,
     targeting_gbar_floor_scale: Optional[float] = 1.0,
+    cross_fit: Union[str, bool] = "tuner",
 ) -> dict[str, Any]:
     learner = RightCensoredEntropyTargetLearner(
         clip=clip,
@@ -1092,6 +1106,7 @@ def right_censored_entropy_targeting_M_step(
         observed_data=observed_data,
         km=km,
         mode=mode,
+        cross_fit=cross_fit,
     )
 
 

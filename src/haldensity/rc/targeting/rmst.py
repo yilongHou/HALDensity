@@ -8,6 +8,8 @@ import pandas as pd
 
 from haldensity.rc.estimators import RightCensoredInitEstimator
 from haldensity.rc.km import KaplanMeier, last_time_as_event
+from haldensity.core.crossfit import resolve_cross_fit
+from haldensity.rc.targeting.crossfit import rmst_spec, run_cross_fitted
 from haldensity.rc.targeting.eic import (
     _censoring_jump_weights,
     _compute_exact_rmst_eif,
@@ -712,6 +714,7 @@ class RightCensoredRMSTTargetLearner:
         km: Optional[KaplanMeier] = None,
         mode: str = "iterative",
         store_pointwise_arrays: Optional[bool] = None,
+        cross_fit: Union[str, bool] = "tuner",
     ) -> dict[str, Any]:
         if mode not in {"auto", "one_step", "iterative"}:
             raise ValueError("mode must be one of {'auto', 'one_step', 'iterative'}.")
@@ -721,6 +724,19 @@ class RightCensoredRMSTTargetLearner:
         missing = required_cols.difference(observed_data.columns)
         if missing:
             raise ValueError(f"observed_data is missing required columns: {sorted(missing)}")
+        cross_fit = resolve_cross_fit(cross_fit)
+        if cross_fit != "none":                      # haldensity.rc.targeting.crossfit
+            tau_grid = _normalize_tau_points(targeting_points)
+            result = run_cross_fitted(
+                [rmst_spec(tau, self.survival_clip) for tau in tau_grid], initial_estimator, observed_data,
+                cross_fit=cross_fit, mode=mode, clip=self.clip, survival_clip=self.survival_clip,
+                targeting_gbar_floor_scale=self.targeting_gbar_floor_scale, max_iter=self.max_iter,
+                min_abs_eps=self.min_abs_eps, min_score_tol=self.min_score_tol,
+                eps_bracket_start=self.eps_bracket_start, eps_bracket_growth=self.eps_bracket_growth,
+                eps_bracket_max=self.eps_bracket_max, eps_fallback_bounds=self.eps_fallback_bounds,
+                api_version="rmst_cross_fitted")
+            result["targeting_points"] = tau_grid
+            return result
         observed_data = last_time_as_event(observed_data)
 
         tau_grid = _normalize_tau_points(targeting_points)
@@ -1180,6 +1196,7 @@ def right_censored_rmst_targeting_M_step(
     min_score_tol: float = 1e-8,
     store_pointwise_arrays: bool = False,
     targeting_gbar_floor_scale: Optional[float] = 1.0,
+    cross_fit: Union[str, bool] = "tuner",
 ) -> dict[str, Any]:
     learner = RightCensoredRMSTTargetLearner(
         clip=clip,
@@ -1201,6 +1218,7 @@ def right_censored_rmst_targeting_M_step(
         targeting_points=targeting_points,
         km=km,
         mode=mode,
+        cross_fit=cross_fit,
     )
 
 

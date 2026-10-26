@@ -52,6 +52,7 @@ def test_right_censored_survival_targeting_scalar_and_vector_shapes():
     estimator, km = _fit_initial_estimator(data)
 
     scalar_fit = right_censored_survival_targeting_M_step(
+        cross_fit="none",
         initial_estimator=estimator,
         observed_data=data,
         targeting_points=0.5,
@@ -70,6 +71,7 @@ def test_right_censored_survival_targeting_scalar_and_vector_shapes():
     assert pointwise_fit["target_grid_augmented_with_t0"] in (True, False)
 
     vector_fit = right_censored_survival_targeting_M_step(
+        cross_fit="none",
         initial_estimator=estimator,
         observed_data=data,
         targeting_points=np.array([0.2, 0.4, 0.6, 0.8]),
@@ -89,6 +91,7 @@ def test_right_censored_survival_targeting_store_arrays_and_numerics():
     estimator, km = _fit_initial_estimator(data)
 
     targeted = right_censored_survival_targeting_M_step(
+        cross_fit="none",
         initial_estimator=estimator,
         observed_data=data,
         targeting_points=np.array([0.25, 0.5]),
@@ -124,6 +127,7 @@ def test_right_censored_survival_targeting_variance_selector_uses_initial_by_def
     estimator, km = _fit_initial_estimator(data)
 
     targeted = right_censored_survival_targeting_M_step(
+        cross_fit="none",
         initial_estimator=estimator,
         observed_data=data,
         targeting_points=np.array([0.25, 0.5, 0.75]),
@@ -244,6 +248,7 @@ def test_right_censored_survival_aipw_matches_tmle_initial_stage_statistics():
         store_pointwise_arrays=False,
     )
     tmle_fit = right_censored_survival_targeting_M_step(
+        cross_fit="none",
         initial_estimator=estimator,
         observed_data=data,
         targeting_points=target_points,
@@ -275,6 +280,7 @@ def test_right_censored_survival_targeting_v2_shape_and_stage_fields():
     estimator, km = _fit_initial_estimator(data)
 
     targeted_v2 = right_censored_survival_targeting_M_step_v2(
+        cross_fit="none",
         initial_estimator=estimator,
         observed_data=data,
         targeting_points=np.array([0.25, 0.5]),
@@ -339,6 +345,7 @@ def test_right_censored_survival_targeting_v2_mode_one_step_matches_v1():
     target_points = np.array([0.2, 0.4, 0.6])
 
     targeted_v1 = right_censored_survival_targeting_M_step(
+        cross_fit="none",
         initial_estimator=estimator,
         observed_data=data,
         targeting_points=target_points,
@@ -346,6 +353,7 @@ def test_right_censored_survival_targeting_v2_mode_one_step_matches_v1():
         store_pointwise_arrays=False,
     )
     targeted_v2 = right_censored_survival_targeting_M_step_v2(
+        cross_fit="none",
         initial_estimator=estimator,
         observed_data=data,
         targeting_points=target_points,
@@ -376,6 +384,7 @@ def test_right_censored_survival_targeting_v2_auto_can_skip_initial_targeting():
     estimator, km = _fit_initial_estimator(data)
 
     targeted_v2 = right_censored_survival_targeting_M_step_v2(
+        cross_fit="none",
         initial_estimator=estimator,
         observed_data=data,
         targeting_points=np.array([0.25, 0.5, 0.75]),
@@ -400,6 +409,7 @@ def test_right_censored_survival_targeting_v2_step_one_matches_final_when_it_sto
     estimator, km = _fit_initial_estimator(data)
 
     targeted_v2 = right_censored_survival_targeting_M_step_v2(
+        cross_fit="none",
         initial_estimator=estimator,
         observed_data=data,
         targeting_points=np.array([0.2, 0.4, 0.6, 0.8]),
