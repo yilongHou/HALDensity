@@ -13,7 +13,7 @@ datasets    sample data and simple simulators
 import importlib
 from typing import Any
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 _SUBPACKAGES = ("core", "full_uni", "full_multi", "rc", "ic", "datasets")
 __all__ = list(_SUBPACKAGES)

@@ -45,6 +45,14 @@ processes. Raise the count only when one fit runs alone on a dedicated machine:
 scipy calls outside the solvers keep numpy's own setting, so for many parallel workers also export
 `OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1` before starting Python.
 
+Solvers
+
+The final fit tries MOSEK, CLARABEL, ECOS and SCS, in that order, and keeps the first solution that
+passes the optimality check. MOSEK is optional and needs a license (`pip install mosek`); without it,
+the fit starts at CLARABEL. `solver_used_` on the fitted estimator says which solver produced a fit.
+Fits that pass the optimality check agree across solvers (log-densities within about 0.004 in our
+cross-check).
+
 Quickstart
 
 ```python

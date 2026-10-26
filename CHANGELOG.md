@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (0.2.0)
+## 0.2.0 (2026-10-26)
 
 Relative to `v0.1.0` (`fd4e22a`, origin/main on 2026-10-23).
 
