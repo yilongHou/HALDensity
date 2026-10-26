@@ -66,7 +66,7 @@ def test_the_default_se_rule_is_the_scaled_floor_at_1e_5():
     parameters = inspect.signature(estimate_covariance_beta).parameters
     assert parameters["_inverse"].default == "scaled_floor" and parameters["_floor"].default == SCALED_FLOOR == 1e-5
     assert parameters["_information"].default == "empirical"
-    assert parameters["_ridge_param"].default == REFERENCE_RIDGE == 1e-6
+    assert parameters["_ridge_param"].default is None and REFERENCE_RIDGE == 1e-6  # None: the reference ridge
     x = np.linspace(0.05, 0.6, 5)
     for k in (0, 2):
         data, estimator = _fit(k)
@@ -78,6 +78,9 @@ def test_the_default_se_rule_is_the_scaled_floor_at_1e_5():
         with pytest.warns(DeprecationWarning, match="absolute ridge"):
             old_option = estimate_covariance_beta(data, results, basis_order=k, ridge_param=1e-6)
         np.testing.assert_array_equal(old_option, ridge)  # the 0.1.0 option keeps the 0.1.0 rule
+        with pytest.raises(ValueError, match="_ridge_param applies only"):   # review C3: never ignored silently
+            estimate_covariance_beta(data, results, basis_order=k, _ridge_param=1e-4)
+        np.testing.assert_array_equal(ridge, estimate_covariance_beta(data, results, basis_order=k, _inverse="ridge"))
         if k == 0:
             # indicators: both constants are negligible against the information, so the rules differ only in that
             # the default drops the column constant on the data (the knot at min(x), selected here; review C1),

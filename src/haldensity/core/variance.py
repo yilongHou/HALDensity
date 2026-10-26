@@ -199,7 +199,7 @@ def estimate_covariance_beta(
     support_refit: SupportRefitArg = "auto",
     _inverse: str = "scaled_floor",
     _floor: float = SCALED_FLOOR,
-    _ridge_param: float = REFERENCE_RIDGE,
+    _ridge_param: Optional[float] = None,
     _relative_cutoff: float = 1e-10,
     _information: str = "empirical",
     _support: tuple[float, float] = SUPPORT,
@@ -215,7 +215,7 @@ def estimate_covariance_beta(
     with a warning.
 
     Internal: ``_inverse="ridge"`` is the 0.1.0 rule, the information plus the absolute ridge
-    ``_ridge_param`` (1e-6), kept as the reference the paper's experiments compute alongside; the 0.1.0
+    ``_ridge_param`` (1e-6 when not given), kept as the reference the paper's experiments compute alongside; the 0.1.0
     option ``ridge_param`` still selects it (deprecated). ``_inverse="cutoff"`` inverts the information
     through its singular values with a relative cutoff ``_relative_cutoff`` (round 1; not adopted);
     ``_information="model"`` uses the covariance of the basis under the fitted density instead of the
@@ -231,7 +231,11 @@ def estimate_covariance_beta(
             DeprecationWarning, stacklevel=2)
         _inverse, _ridge_param = "ridge", float(deprecated.pop("ridge_param"))
     take_deprecated("estimate_covariance_beta", deprecated, {})  # anything else is an unknown argument
-    ridge_param = _ridge_param
+    if _ridge_param is not None and _inverse != "ridge":
+        # review C3: on its own it would be ignored silently, since the default rule is the scaled floor
+        raise ValueError("_ridge_param applies only with _inverse='ridge' (the absolute ridge); the default rule is "
+                         "the scaled floor, set by _floor")
+    ridge_param = REFERENCE_RIDGE if _ridge_param is None else float(_ridge_param)
     if _inverse not in INVERSES:
         raise ValueError(f"_inverse must be one of {INVERSES}, got {_inverse!r}")
     if _information not in INFORMATIONS:

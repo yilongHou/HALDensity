@@ -385,6 +385,9 @@ The old behaviour of these fixes is available at `v0.1.0`.
 
 ### Fixed
 
+- `estimate_covariance_beta(_ridge_param=...)` without `_inverse="ridge"` was ignored silently once the scaled
+  floor became the default (review C3); it now raises a ValueError. `_inverse="ridge"` alone uses the reference
+  ridge 1e-6.
 - `ProximalAdaGradEstimator(log_frequency=0)` divided by zero (review C2; older code): its objective check was
   paced by the logging frequency. The check now has its own interval, |log_frequency| (every iteration when it
   is 0), so every nonzero value gives the same results as before.
