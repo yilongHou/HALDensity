@@ -24,6 +24,7 @@ This repo uses Python 3.11+. With pip:
 ```bash
 pip install -e .             # the package
 pip install -e ".[dev]"      # plus test and lint tools
+pip install -e ".[examples]" # plus matplotlib and ipykernel, to run the tutorials
 pip install -e ".[turnbull]" # plus lifelines, for knot_strategy="turnbull" with interval-censored data
 ```
 
@@ -169,7 +170,8 @@ Notes
 
 Examples
 
-Tutorials per data type, in `examples/tutorials/`. They use the public API and run in CI:
+Tutorials per data type, in `examples/tutorials/`. They use the public API and run in CI; to run them, install
+`pip install "haldensity[examples]"` (adds matplotlib and ipykernel):
 
 - `full_uni/01_galaxies.ipynb`: the galaxy velocities (Roeder 1990): a larger fitting grid for data that
   occupy a small part of [0, 1], cross-validation, pointwise 95% intervals

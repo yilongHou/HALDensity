@@ -342,6 +342,9 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   3.11 only and the README already said 3.11+. The license metadata is the SPDX expression `license = "MIT"`
   with `license-files`, and the build needs setuptools 77 or later (the TOML-table form and the license
   classifier are deprecated and stop building after 2027-02-18).
+- **matplotlib and ipykernel are an extra** (`pip install "haldensity[examples]"`; Yilong, 2026-10-25): they
+  were dependencies of the package since 0.1.0, but no package code imports them; only the tutorials need them.
+  CI installs `.[dev,examples]`; `examples/tutorials/README.md` gives the install line.
 - **Right-censored data: the largest observed time counts as an event when it is censored** (the
   Kaplan–Meier convention; Yilong, 2026-10-24; rc). `KaplanMeier.fit` applies it to the data it is fitted
   on, so the censoring survival estimate stays positive at every observed time; before, it fell to 0 at a
