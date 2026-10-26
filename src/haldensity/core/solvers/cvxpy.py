@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import warnings
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Iterator, Optional, Sequence
 
@@ -150,7 +151,9 @@ def solve_cvxpy_problem(
         kwargs["solver"] = solver_name
 
         try:
-            with limited_threads(solver_threads):
+            with warnings.catch_warnings(), limited_threads(solver_threads):
+                # the status is recorded and checked below; CVXPY's notice is noise here
+                warnings.filterwarnings("ignore", message="Solution may be inaccurate", category=UserWarning)
                 problem.solve(**kwargs)
         except Exception as exc:  # pragma: no cover - solver availability varies by environment
             last_exception = exc

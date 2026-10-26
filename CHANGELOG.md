@@ -388,6 +388,9 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
 - `WeightedHALMLEEstimator.get_fit()` returns a `HALFit`; `RightCensoredInitEstimator.get_fit()`
   still returns a `RightCensoredHALFit` with the same state dictionary.
 - `MultvarHAL` warns when fitted on one-dimensional data.
+- CVXPY's "Solution may be inaccurate" notice is silenced in `haldensity.core.solvers.solve_cvxpy_problem`, as
+  in the final fit's ladder: the status is still recorded and accepted or passed to the next solver as before
+  (Yilong, 2026-10-26; seen without MOSEK in the entropy and density-L2 targeting test).
 - `lifelines` is an optional extra: `pip install "haldensity[turnbull]"` (only
   `knot_strategy="turnbull"` uses it).
 - **Python 3.11 or later** (`requires-python = ">=3.11"`; Yilong, 2026-10-25): 0.1.0 declared 3.9, but CI tests
