@@ -266,12 +266,14 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   2; core): `estimate_covariance_beta` adds a ridge of 1e-5 times each column's own score variance (the
   information scaled to unit diagonal, plus 1e-5 I, scaled back) instead of the absolute ridge 1e-6. The rule
   has no units, so the SE no longer changes when the data's units do; the intercept and any column constant on
-  the data are dropped. Evidence (round 2, 180 cells, rules fixed in advance): on the original data the floor
+  the data are dropped (no spread there, e.g. the knot at min(x) at k = 0, whose centred score is not 0; review
+  C1, 2026-10-25: it had been kept, adding about p(x)^2 / n to the variance; k = 0 SEs fall by 1-7% where that
+  knot is selected). Evidence (round 2, 180 cells, rules fixed in advance): on the original data the floor
   matches the ridge's coverage (mean |coverage - 95%|, floor minus ridge, -0.026, bootstrap SE 0.0015); on
   copies of the same data with squeezed units the ridge loses more than 3 coverage points in 98 of 180 cells,
   while the floor's SE is unchanged to 1e-9. **SEs and intervals change**: before/after on 12 fixed fits (the
-  same cleaned fit, M chosen by CV; SE new / old, median over the data's 5-95% quantiles): k = 0 1.000 on all
-  four data sets; on three simulated samples that fill [0, 1] (n = 400) 1.01-1.13 at k = 1 and 1.18-1.19 at
+  same cleaned fit, M chosen by CV; SE new / old, median over the data's 5-95% quantiles): k = 0 0.97-1.00
+  (below 1 only where the knot at min(x) is selected); on three simulated samples that fill [0, 1] (n = 400) 1.01-1.13 at k = 1 and 1.18-1.19 at
   k = 2 (1.68 for a fit with 349 knots); on Galaxies (8% of [0, 1]) 1.64 at k = 1 and 4.38 at k = 2, where
   the old ridge was too narrow (band width over the data range 0.43 times a bootstrap's at fixed M; the floor's
   is 1.61 times). The absolute ridge stays available internally (`_inverse="ridge"`, `_ridge_param`) as the

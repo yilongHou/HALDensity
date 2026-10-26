@@ -167,12 +167,17 @@ def _covariance_from_information(information: np.ndarray, root: Optional[np.ndar
 
 
 def _constant_columns(basis_at_data: np.ndarray, scores: np.ndarray) -> np.ndarray:
-    """Columns to drop: the intercept (column 0, its centred score is zero up to rounding) and any column whose
-    centred score is negligible against the column itself, a test that does not depend on the data's units (a
-    threshold relative to the other columns would: squeezing the data shrinks them, not the rounding residue)."""
+    """Columns to drop: the intercept (column 0, its centred score is zero up to rounding), any column with no
+    spread on the data, and any column whose centred score is negligible against the column itself, a test that
+    does not depend on the data's units (a threshold relative to the other columns would: squeezing the data
+    shrinks them, not the rounding residue).
+
+    A column constant on the data carries no information there, but its centred score need not be zero: at
+    k = 0 the knot at min(x) is all ones on the data while its centred score is P(X < min(x)) under the fit
+    (review C1, 2026-10-25: it was kept and added about p(x)^2 / n to the variance at every x >= min(x))."""
     rms_basis = np.sqrt(np.mean(basis_at_data ** 2, axis=0))
     rms_scores = np.sqrt(np.mean(scores ** 2, axis=0))
-    constant = rms_scores <= CONSTANT_COLUMN_TOL * rms_basis
+    constant = (rms_scores <= CONSTANT_COLUMN_TOL * rms_basis) | (np.ptp(basis_at_data, axis=0) == 0)
     constant[0] = True
     return constant
 

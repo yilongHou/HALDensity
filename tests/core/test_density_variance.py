@@ -78,10 +78,13 @@ def test_the_default_se_rule_is_the_scaled_floor_at_1e_5():
         with pytest.warns(DeprecationWarning, match="absolute ridge"):
             old_option = estimate_covariance_beta(data, results, basis_order=k, ridge_param=1e-6)
         np.testing.assert_array_equal(old_option, ridge)  # the 0.1.0 option keeps the 0.1.0 rule
-        if k == 0:  # indicators: both constants are negligible against the information
-            se_default = density_confidence_interval(x, results, default, basis_order=k)["se"]
-            se_ridge = density_confidence_interval(x, results, ridge, basis_order=k)["se"]
-            np.testing.assert_allclose(se_default, se_ridge, rtol=1e-3)
+        if k == 0:
+            # indicators: both constants are negligible against the information, so the rules differ only in that
+            # the default drops the column constant on the data (the knot at min(x), selected here; review C1),
+            # which the absolute ridge keeps and which only adds variance
+            se_default = density_confidence_interval(x, results, default, basis_order=k)["se"].to_numpy()
+            se_ridge = density_confidence_interval(x, results, ridge, basis_order=k)["se"].to_numpy()
+            assert np.all(se_default <= se_ridge * (1 + 1e-3)) and np.all(se_default >= 0.9 * se_ridge)
 
 
 def test_relative_cutoff_and_model_information_are_internal_candidates():
@@ -153,6 +156,23 @@ def test_constant_columns_are_found_relative_to_each_column():
     scaled = basis * np.array([1.0, 1e-4, 1e-4])
     assert _constant_columns(scaled, scores * np.array([1.0, 1e-4, 1e-4])).tolist() == [True, False, False]
 
+
+
+def test_a_column_constant_on_the_data_is_dropped_even_with_a_nonzero_centred_score():
+    # review C1: at k = 0 the knot at min(x) is all ones on the data, while its centred score is P(X < min x)
+    # under the fit, not 0; it carries no information on the data and must be dropped like the intercept
+    from haldensity.core.variance import _constant_columns
+    rng = np.random.default_rng(5)
+    basis = np.column_stack([np.ones(50), np.ones(50), rng.uniform(size=50)])
+    scores = basis - np.array([1.0, 0.97, 0.5])           # E[phi] under the fit: 0.97 for the all-ones knot column
+    assert _constant_columns(basis, scores).tolist() == [True, True, False]
+    data, estimator = _fit(0)
+    results = estimator.get_results()
+    knots = np.unique(np.asarray(results["data_points"], dtype=float))
+    selected = knots[np.asarray(results["theta_hat"])[1:] != 0]
+    assert selected.min() == data["W1"].min()              # this fit selects the knot at min(x)
+    cov = estimate_covariance_beta(data, results, basis_order=0)
+    assert np.all(cov[1] == 0) and np.all(cov[:, 1] == 0)  # column 1 is that knot (after the intercept)
 
 def test_log_scale_interval_uses_the_same_se():
     # Yilong (2026-10-24): the log-scale interval exp(log p-hat +- z SE / p-hat) as an option; the default is unchanged
