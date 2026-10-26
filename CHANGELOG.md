@@ -385,6 +385,9 @@ The old behaviour of these fixes is available at `v0.1.0`.
 
 ### Fixed
 
+- Rows with a missing value in the data passed to `estimate_covariance_beta` (review C5; older code): the fit
+  drops them, but the SE counted them as observations below every knot at k = 0 and returned all-NaN SEs at
+  k >= 1, without a warning. The SE now drops them too.
 - Memory of the delta-method SE (review C4): E[phi] built the whole basis at every quadrature node (64,064 x
   1,002 float64 at 1,000 knots), and `density_confidence_interval` built it a second time just for the
   original fit's density. It is now summed 4,096 nodes at a time and the density needs only log Z: at 1,000

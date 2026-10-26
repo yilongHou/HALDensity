@@ -177,6 +177,20 @@ def test_a_column_constant_on_the_data_is_dropped_even_with_a_nonzero_centred_sc
     cov = estimate_covariance_beta(data, results, basis_order=0)
     assert np.all(cov[1] == 0) and np.all(cov[:, 1] == 0)  # column 1 is that knot (after the intercept)
 
+
+@pytest.mark.parametrize("k", [0, 1])
+def test_rows_with_a_missing_value_are_dropped_as_the_fit_drops_them(k):
+    # review C5: at k = 0 they counted as observations below every knot, at k >= 1 they made every SE NaN
+    data, estimator = _fit(k)
+    with_missing = pd.concat([data, pd.DataFrame({"W1": [np.nan, np.nan]})], ignore_index=True)
+    results = estimator.get_results()
+    x = np.linspace(0.05, 0.6, 5)
+    se = density_confidence_interval(x, results, estimate_covariance_beta(data, results, basis_order=k),
+                                     basis_order=k)["se"].to_numpy()
+    se_missing = density_confidence_interval(x, results, estimate_covariance_beta(with_missing, results, basis_order=k),
+                                             basis_order=k)["se"].to_numpy()
+    np.testing.assert_array_equal(se_missing, se)
+
 def test_log_scale_interval_uses_the_same_se():
     # Yilong (2026-10-24): the log-scale interval exp(log p-hat +- z SE / p-hat) as an option; the default is unchanged
     data, estimator = _fit(2)

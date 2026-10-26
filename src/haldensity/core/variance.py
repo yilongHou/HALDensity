@@ -240,6 +240,9 @@ def estimate_covariance_beta(
         raise ValueError(f"_inverse must be one of {INVERSES}, got {_inverse!r}")
     if _information not in INFORMATIONS:
         raise ValueError(f"_information must be one of {INFORMATIONS}, got {_information!r}")
+    # rows with a missing value are not observations: the fit drops them, so the SE does too (review C5; they
+    # counted as observations below every knot at k = 0 and made every SE NaN at k >= 1)
+    data = data.loc[np.isfinite(np.asarray(data["W1"], dtype=float))]
     if isinstance(support_refit, str):
         if support_refit != "auto":
             raise ValueError("support_refit must be 'auto', None or a SupportRefit")
