@@ -162,8 +162,11 @@ se = np.sqrt(median_estimand_variance(targeted_fit=targeted_fit, uncensored_data
 
 Notes
 
-- For CDF/Survival, give `targeting_points` inside the data: beyond the data the empirical value is 0 or 1,
-  which the targeted density can only approach as its coefficients reach the L1 bound.
+- For CDF/Survival, every interval cut by the targeting points (below the first point, between two
+  consecutive points, above the last) should hold an observation. Where one does not, the empirical value asks
+  the targeted density for no mass there, which it only approaches as its coefficients grow; once they reach
+  the L1 bound the score equations hold only approximately (`score_residual`) and the learner warns. Raise
+  `norm_constraint` (100 in the examples above; the learners' default is 20) or move the points.
 - For Moments, give `x_moment` (integer power).
 - For Median, no extra arguments: the learner takes one targeting step at the initial fit's median m, so
   F(m) = P_n(X < m) holds at m; the targeted median need not be an empirical median.

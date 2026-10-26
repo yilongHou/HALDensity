@@ -113,3 +113,28 @@ def test_the_results_model_keeps_how_the_targeting_was_solved():
     model = learner.to_results_model(fit)
     assert model.score_residual == fit["score_residual"]
     assert model.solver_used == str(fit["solver_used"]) and model.solver_status == str(fit["solver_status"])
+
+
+def test_a_binding_bound_warns():
+    # review T1: with 40 targeting points and intervals between them that hold no observation, the default bound
+    # (20) binds and the TMLE is not exact; the learner must say so. A larger bound gives the exact TMLE.
+    import warnings
+
+    import pandas as pd
+    import pytest
+
+    from haldensity.full_uni import CVXPYEstimator
+    from haldensity.full_uni.targeting import SurvivalTargetLearner, targeting_inputs
+
+    x = np.random.default_rng(3).beta(2, 5, 300)
+    data = pd.DataFrame({"W1": x[(np.abs(x - 0.3) > 0.012) & (np.abs(x - 0.5) > 0.012)]})
+    inputs = targeting_inputs(CVXPYEstimator(norm_constraint=10.0, basis_order=1).fit(data))
+    points = np.linspace(0.05, 0.75, 40)
+    with pytest.warns(UserWarning, match="reached their L1 bound"):
+        SurvivalTargetLearner(norm_constraint=20, basis_order=1).run_m_step(
+            uncensored_augmented=data, **inputs, targeting_points=points)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        fit = SurvivalTargetLearner(norm_constraint=100, basis_order=1).run_m_step(
+            uncensored_augmented=data, **inputs, targeting_points=points)
+    assert fit["score_residual"] < 1e-10

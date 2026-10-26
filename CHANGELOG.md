@@ -224,6 +224,10 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   subclass.
 - `OptunaHyperparameterTuner(estimator_kwargs=...)` and `best_estimator_params`.
 - CI: the test suite on Python 3.11 for pushes and pull requests.
+- Full-data targeting warns when its score equations are not solved (largest error above 1e-8; review T1),
+  naming the cause: the targeting coefficients reached their L1 bound, which happens when an interval cut by
+  the targeting points holds no observation (40 points with two such intervals: the default bound 20 binds and
+  the TMLE misses the empirical survival by 6.5e-4; with 100 it is exact). The README states the condition.
 - Tutorials per data type in `examples/tutorials/`, using the public API only (Yilong, 2026-10-24):
   `full_uni/01_galaxies`, `full_uni/02_simulated_density`, `full_uni/03_targeting`, `full_multi/01_bivariate`,
   `rc/01_point_estimators` and `rc/02_tmle` (standard errors for survival, the mean and RMST; density L2 and

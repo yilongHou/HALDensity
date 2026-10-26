@@ -19,6 +19,8 @@ TARGETED_RULE_TOL = 1e-10
 # tight settings rarely report "optimal" here although the solution is good (SCS then ran for minutes)
 SCORE_TOL = 1e-12
 MAX_POLISH_STEPS = 50
+# above this largest score-equation error the estimate is not the exact TMLE, and run_m_step warns
+SCORE_WARN = 1e-8
 
 
 FALLBACK_WARNING = ("targeted_fit has no exact 'estimate' (made before 0.2.0?); using sums over its fine grid, "
@@ -270,6 +272,14 @@ class BaseTargetLearner:
         mass = rule.weights * np.exp(targeted(rule.points) - targeted_density.log_z)
         score_residual = float(np.max(np.abs(mass @ self._targeting_at(rule.points, kwargs)
                                              - b_ik_targeting.mean(axis=0))))
+        if score_residual > SCORE_WARN:
+            at_bound = np.abs(theta_targeting).sum() >= self.norm_constraint * (1 - 1e-6)
+            reason = (f"the targeting coefficients reached their L1 bound (norm_constraint={self.norm_constraint}); "
+                      "raise it. This happens when an interval cut by the targeting points (below the first point, "
+                      "between two consecutive points or above the last) holds no observation, so the targeted "
+                      "density must put almost no mass there" if at_bound else "the solver stopped early")
+            warnings.warn(f"The targeting step's score equations hold only to {score_residual:.1e}, so the estimate "
+                          f"is not the exact TMLE: {reason}.", UserWarning, stacklevel=2)
         estimate, density_at_estimate = self.target_values(targeted_density, **kwargs)
         plug_in, _ = self.target_values(ExactDensity(fixed, rule), **kwargs)
 
