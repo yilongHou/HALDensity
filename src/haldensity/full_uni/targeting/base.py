@@ -44,6 +44,10 @@ class TargetingResults(BaseModel):
     density_at_estimate: Optional[list[float]] = None
     log_normalizer: Optional[float] = None
     integration_order: Optional[int] = None
+    # how the targeting step was solved: the largest score-equation error, the solver and its status
+    score_residual: Optional[float] = None
+    solver_used: Optional[str] = None
+    solver_status: Optional[str] = None
 
 
 def targeting_inputs(fit: Any) -> dict[str, np.ndarray]:
@@ -335,4 +339,7 @@ class BaseTargetLearner:
             density_at_estimate=as_list(results.get("density_at_estimate")),
             log_normalizer=None if results.get("log_normalizer") is None else float(results["log_normalizer"]),
             integration_order=None if results.get("integration_order") is None else int(results["integration_order"]),
+            score_residual=None if results.get("score_residual") is None else float(results["score_residual"]),
+            solver_used=None if results.get("solver_used") is None else str(results["solver_used"]),
+            solver_status=None if results.get("solver_status") is None else str(results["solver_status"]),
         )

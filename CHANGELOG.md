@@ -380,6 +380,8 @@ The old behaviour of these fixes is available at `v0.1.0`.
 
 ### Fixed
 
+- `TargetingResults` (and `to_results_model`) kept the exact estimates but dropped `score_residual`,
+  `solver_used` and `solver_status` (review T5); they are fields now.
 - Full-data targeting crashed for an order-0 fit with no selected knots (review T3; older code):
   `create_basis_functions` with no columns now returns an (n, 0) matrix instead of failing in `np.column_stack`.
 - Full-data targeting variances (review T2 and T4; older code): the influence curve of S(t) = P(X > t) used

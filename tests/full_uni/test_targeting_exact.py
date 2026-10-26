@@ -97,3 +97,19 @@ def test_targeting_works_when_the_fit_selects_no_knots():
         uncensored_augmented=data, **inputs, x_moment=1)
     np.testing.assert_allclose(survival["estimate"], [np.mean(x > 0.3)], atol=1e-12)
     np.testing.assert_allclose(mean["estimate"], [x.mean()], atol=1e-12)
+
+
+def test_the_results_model_keeps_how_the_targeting_was_solved():
+    # review T5: TargetingResults dropped score_residual, solver_used and solver_status
+    import pandas as pd
+
+    from haldensity.full_uni import CVXPYEstimator
+    from haldensity.full_uni.targeting import SurvivalTargetLearner, targeting_inputs
+
+    data = pd.DataFrame({"W1": np.random.default_rng(1).beta(2, 5, 150)})
+    learner = SurvivalTargetLearner(norm_constraint=100, basis_order=1)
+    fit = learner.run_m_step(uncensored_augmented=data, **targeting_inputs(CVXPYEstimator(norm_constraint=10.0,
+                             basis_order=1).fit(data)), targeting_points=np.array([0.2, 0.4]))
+    model = learner.to_results_model(fit)
+    assert model.score_residual == fit["score_residual"]
+    assert model.solver_used == str(fit["solver_used"]) and model.solver_status == str(fit["solver_status"])
