@@ -19,15 +19,18 @@ def _censoring_jump_weights(
 
     The censoring term of the influence curves integrates E[phi(T*) | T* > u] against d(1/G)(u); for the
     Kaplan-Meier step function the jump of 1/G at u is dG(u) / (G(u-) G(u)), not dG(u) / G(u)^2, which
-    overweights the jumps where the risk set is small. G is floored at max(targeting_gbar_floor, clip), as in
-    the rest of the influence curve; ``mask`` selects jumps (e.g. those before a time point).
+    overweights the jumps where the risk set is small. G is floored at f = max(targeting_gbar_floor, clip), as
+    in the rest of the influence curve, and the weight is the jump of 1/max(G, f), so the jump dG is floored
+    too (zero once G(u-) is below f; review F1): the influence curve is then exactly the one for the floored
+    G, and survival's I(t > t0) / G(t0) form stays equal to the general one. ``mask`` selects jumps (e.g. those
+    before a time point).
     """
     effective_floor = float(max(targeting_gbar_floor, censoring_cache.clip))
     select = slice(None) if mask is None else np.asarray(mask, dtype=bool)
     left = np.maximum(np.asarray(censoring_cache.gbar_left, dtype=float)[select], effective_floor)
     right = np.maximum(np.asarray(censoring_cache.gbar_right, dtype=float)[select], effective_floor)
     denominators = left * right
-    return np.asarray(censoring_cache.jump_masses, dtype=float)[select] / denominators, denominators
+    return np.clip(left - right, 0.0, None) / denominators, denominators
 
 
 def _gbar_floor_active(target_grid: Any, censoring_cache: Any, floor: float, horizon: float | None = None) -> bool:

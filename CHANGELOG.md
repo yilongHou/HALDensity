@@ -419,8 +419,12 @@ The old behaviour of these fixes is available at `v0.1.0`.
   rc; older code). Each censoring jump u contributed E[phi(T*) | T* > u] dG(u) / G(u)^2; the discrete IPCW
   mapping needs dG(u) / (G(u-) G(u)), the jump of 1/G at u. The two differ most at the end of follow-up, where
   risk sets are small (by a factor of 2 with 2 at risk). Fixed in one helper used by all five targets, survival
-  v1 and v2 and AIPW. Check: under a discrete censoring distribution, E[D | T* = t] = phi(t) - psi holds to
-  1e-13 (the old form was off by up to 4.3 in the same test). Effect on three fixed samples (n = 200 and 400,
+  v1 and v2 and AIPW. Where the floor on G binds, the weight is the jump of 1/max(G, f), the floored dG included
+  (review F1; before, dG stayed unfloored), so the influence curve is exactly the one for the floored G and
+  survival's closed form I(t > t0) / G(t0) stays equal to the general one. Check: under a discrete censoring
+  distribution, E[D | T* = t] = phi(t) - psi holds to 1e-12 at all eight places that build the term, with and
+  without the floor binding (the old form was off by up to 4.3 for the mean; the unfloored dG, by up to 1.46 for
+  density L2 with the floor binding). Effect on three fixed samples (n = 200 and 400,
   the initial fit fixed): the SE of the mean +7% to +16%, the entropy +1% to +13%, density L2 -2% to -4%,
   survival at 0.8 and AIPW +1% to +7% (unchanged at 0.2-0.6), RMST(0.8) 0% to +1%; the targeted estimates
   move by at most 0.14 SE.

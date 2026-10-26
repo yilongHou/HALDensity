@@ -268,7 +268,9 @@ def test_density_l2_direction_respects_targeting_gbar_floor():
         targeting_gbar_floor=0.2,
     )
 
-    expected_increment = 2.0 * 1.0 * 0.99 / (1.0 * 0.2)  # G(u) = 0.01 floored at 0.2; G(u-) = 1
+    # the jump of 1/max(G, 0.2) (review F1): G(u) = 0.01 floored at 0.2, G(u-) = 1, so 1/0.2 - 1/1 (it was the
+    # unfloored dG = 0.99 over 1 x 0.2)
+    expected_increment = 2.0 * 1.0 * (1.0 / 0.2 - 1.0 / 1.0)
     expected_cumulative = np.array([0.0, expected_increment])
     expected_raw = np.array([2.0 / 1.0, 2.0 / 0.2]) - expected_cumulative
 
