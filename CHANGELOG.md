@@ -385,6 +385,9 @@ The old behaviour of these fixes is available at `v0.1.0`.
 
 ### Fixed
 
+- `ProximalAdaGradEstimator(log_frequency=0)` divided by zero (review C2; older code): its objective check was
+  paced by the logging frequency. The check now has its own interval, |log_frequency| (every iteration when it
+  is 0), so every nonzero value gives the same results as before.
 - `TargetingResults` (and `to_results_model`) kept the exact estimates but dropped `score_residual`,
   `solver_used` and `solver_status` (review T5); they are fields now.
 - Full-data targeting crashed for an order-0 fit with no selected knots (review T3; older code):

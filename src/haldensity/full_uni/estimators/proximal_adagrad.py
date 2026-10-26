@@ -264,6 +264,9 @@ class ProximalAdaGradEstimator(BaseEstimator):
         obj_prev = None
         
         # Main proximal AdaGrad loop
+        # the objective is checked every |log_frequency| iterations (the logging frequency paced it before 0.2.0;
+        # this keeps every nonzero value's results) and every iteration when log_frequency is 0
+        check_every = abs(int(self.log_frequency)) or 1
         for iter_k in range(self.n_iterations):
             # a) Compute gradient
             g = self._compute_gradient(theta, phi_data_full, phi_grid_full, delta_j, n_samples)
@@ -326,7 +329,7 @@ class ProximalAdaGradEstimator(BaseEstimator):
                 self._grid_points_hal = old_grid_points_hal
             
             # Compute objective for logging and relative convergence check
-            if iter_k % self.log_frequency == 0 or iter_k < 10:
+            if iter_k % check_every == 0 or iter_k < 10:
                 obj = self._objective_function(theta, phi_data_full, phi_grid_full, delta_j)
                 
                 # Early stopping if objective function explodes
