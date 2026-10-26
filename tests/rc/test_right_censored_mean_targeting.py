@@ -220,7 +220,7 @@ def test_right_censored_mean_direction_uses_km_jump_sum():
         survival_clip=1e-8,
     )
 
-    expected_increment = 0.75 * 0.2 / (0.8**2)
+    expected_increment = 0.75 * 0.2 / (1.0 * 0.8)  # the jump of 1/G: dG / (G(u-) G(u))
     expected_cumulative = np.array([0.0, expected_increment])
     expected_raw = np.array([0.25 / 1.0, 0.75 / 0.8]) - expected_cumulative
 

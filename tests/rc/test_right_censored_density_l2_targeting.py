@@ -227,7 +227,7 @@ def test_density_l2_direction_uses_km_jump_sum():
     )
 
     expected_tail_density_l2 = 1.0
-    expected_increment = 2.0 * expected_tail_density_l2 * 0.2 / (0.8**2)
+    expected_increment = 2.0 * expected_tail_density_l2 * 0.2 / (1.0 * 0.8)  # dG / (G(u-) G(u))
     expected_cumulative = np.array([0.0, expected_increment])
     expected_raw = np.array([2.0 / 1.0, 2.0 / 0.8]) - expected_cumulative
 
@@ -268,7 +268,7 @@ def test_density_l2_direction_respects_targeting_gbar_floor():
         targeting_gbar_floor=0.2,
     )
 
-    expected_increment = 2.0 * 1.0 * 0.99 / (0.2**2)
+    expected_increment = 2.0 * 1.0 * 0.99 / (1.0 * 0.2)  # G(u) = 0.01 floored at 0.2; G(u-) = 1
     expected_cumulative = np.array([0.0, expected_increment])
     expected_raw = np.array([2.0 / 1.0, 2.0 / 0.2]) - expected_cumulative
 

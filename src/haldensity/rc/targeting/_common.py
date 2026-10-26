@@ -10,6 +10,7 @@ from scipy.optimize import brentq, minimize_scalar
 
 from haldensity.rc.estimators import RightCensoredInitEstimator
 from haldensity.rc.km import KaplanMeier
+from haldensity.rc.targeting.eic import _censoring_jump_weights
 
 
 @dataclass
@@ -281,15 +282,11 @@ def _compute_dfg_t0_on_grid(
     if jump_times.size == 0:
         second_term = np.zeros_like(grid)
         increments = np.empty(0, dtype=float)
-        gbar_right_u = np.empty(0, dtype=float)
+        gbar_jump_denom = np.empty(0, dtype=float)
     else:
         s_u = np.maximum(_evaluate_survival(target_grid, jump_times, survival_clip), survival_clip)
-        gbar_right_u = _evaluate_targeting_gbar(
-            censoring_cache,
-            jump_times,
-            targeting_gbar_floor=effective_gbar_floor,
-        )
-        increments = s_t0 * jump_masses / (s_u * np.square(gbar_right_u))
+        jump_weights, gbar_jump_denom = _censoring_jump_weights(censoring_cache, effective_gbar_floor, active_jump_mask)
+        increments = s_t0 * jump_weights / s_u
         cumulative_increments = np.cumsum(increments)
         cutoff_points = np.minimum(grid, t0)
         cutoff_idx = np.searchsorted(jump_times, cutoff_points, side="right") - 1
@@ -312,9 +309,7 @@ def _compute_dfg_t0_on_grid(
         "target_grid_augmented_with_t0": target_grid.t0_inserted,
         "gbar_t0_right": gbar_t0_right,
         "jump_times": jump_times,
-        "gbar_jump_denom": (
-            np.square(gbar_right_u) if jump_times.size > 0 else np.empty(0, dtype=float)
-        ),
+        "gbar_jump_denom": gbar_jump_denom,
         "jump_increments": increments,
         "first_term_grid": first_term,
         "cumulative_jump_term_grid": second_term,

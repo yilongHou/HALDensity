@@ -9,6 +9,7 @@ import pandas as pd
 from haldensity.rc.estimators import RightCensoredInitEstimator
 from haldensity.rc.km import KaplanMeier, last_time_as_event
 from haldensity.rc.targeting.eic import (
+    _censoring_jump_weights,
     _build_clipped_wald_interval_allow_nan,
     _compute_exact_mean_eif,
     _gbar_floor_active,
@@ -135,17 +136,13 @@ def _compute_mean_direction_on_grid(
     jump_masses = censoring_cache.jump_masses
     if jump_times.size == 0:
         tail_mean_jump = np.empty(0, dtype=float)
-        gbar_right_u = np.empty(0, dtype=float)
+        gbar_jump_denom = np.empty(0, dtype=float)
         increments = np.empty(0, dtype=float)
         cumulative_jump_term = np.zeros_like(grid)
     else:
         tail_mean_jump = _evaluate_tail_mean(target_grid, jump_times, survival_clip)
-        gbar_right_u = _evaluate_targeting_gbar(
-            censoring_cache,
-            jump_times,
-            targeting_gbar_floor=effective_gbar_floor,
-        )
-        increments = tail_mean_jump * jump_masses / np.square(gbar_right_u)
+        jump_weights, gbar_jump_denom = _censoring_jump_weights(censoring_cache, effective_gbar_floor)
+        increments = tail_mean_jump * jump_weights
         cumulative_increments = np.cumsum(increments)
         cutoff_idx = np.searchsorted(jump_times, grid, side="right") - 1
         cumulative_jump_term = np.where(
@@ -167,9 +164,7 @@ def _compute_mean_direction_on_grid(
         "targeting_gbar_floor": effective_gbar_floor,
         "jump_times": jump_times,
         "jump_masses": jump_masses,
-        "gbar_jump_denom": (
-            np.square(gbar_right_u) if jump_times.size > 0 else np.empty(0, dtype=float)
-        ),
+        "gbar_jump_denom": gbar_jump_denom,
         "tail_mean_jump": tail_mean_jump,
         "jump_increments": increments,
         "first_term_grid": first_term,

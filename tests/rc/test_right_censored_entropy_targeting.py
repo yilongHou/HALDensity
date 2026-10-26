@@ -165,7 +165,7 @@ def test_entropy_direction_uses_km_jump_sum():
 
     phi_grid = -np.log(density)
     expected_tail_entropy = phi_grid[1]
-    expected_increment = expected_tail_entropy * 0.2 / (0.8**2)
+    expected_increment = expected_tail_entropy * 0.2 / (1.0 * 0.8)  # dG / (G(u-) G(u))
     expected_cumulative = np.array([0.0, expected_increment])
     expected_raw = np.array([phi_grid[0] / 1.0, phi_grid[1] / 0.8]) - expected_cumulative
 

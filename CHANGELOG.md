@@ -375,6 +375,15 @@ The old behaviour of these fixes is available at `v0.1.0`.
 
 ### Fixed
 
+- **Right-censored influence curves: the censoring term is the jump of 1/G** (review R1, Yilong 2026-10-25;
+  rc; older code). Each censoring jump u contributed E[phi(T*) | T* > u] dG(u) / G(u)^2; the discrete IPCW
+  mapping needs dG(u) / (G(u-) G(u)), the jump of 1/G at u. The two differ most at the end of follow-up, where
+  risk sets are small (by a factor of 2 with 2 at risk). Fixed in one helper used by all five targets, survival
+  v1 and v2 and AIPW. Check: under a discrete censoring distribution, E[D | T* = t] = phi(t) - psi holds to
+  1e-13 (the old form was off by up to 4.3 in the same test). Effect on three fixed samples (n = 200 and 400,
+  the initial fit fixed): the SE of the mean +7% to +16%, the entropy +1% to +13%, density L2 -2% to -4%,
+  survival at 0.8 and AIPW +1% to +7% (unchanged at 0.2-0.6), RMST(0.8) 0% to +1%; the targeted estimates
+  move by at most 0.14 SE.
 - `np.trapz` (removed in NumPy 2.4) replaced in the variance module; delta-method bands crashed
   on current NumPy.
 - The README's targeting example failed at order k >= 1 with a shape error: `get_results()["theta_hat"]`

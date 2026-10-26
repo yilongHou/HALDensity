@@ -10,6 +10,26 @@ def _raw_gbar(cache: Any, t: np.ndarray | float) -> np.ndarray:
     return np.asarray(cache.km.predict(t), dtype=float)
 
 
+def _censoring_jump_weights(
+    censoring_cache: Any,
+    targeting_gbar_floor: float = 0.0,
+    mask: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """The jump of 1/G at each censoring jump u, dG(u) / (G(u-) G(u)), and its denominators G(u-) G(u).
+
+    The censoring term of the influence curves integrates E[phi(T*) | T* > u] against d(1/G)(u); for the
+    Kaplan-Meier step function the jump of 1/G at u is dG(u) / (G(u-) G(u)), not dG(u) / G(u)^2, which
+    overweights the jumps where the risk set is small. G is floored at max(targeting_gbar_floor, clip), as in
+    the rest of the influence curve; ``mask`` selects jumps (e.g. those before a time point).
+    """
+    effective_floor = float(max(targeting_gbar_floor, censoring_cache.clip))
+    select = slice(None) if mask is None else np.asarray(mask, dtype=bool)
+    left = np.maximum(np.asarray(censoring_cache.gbar_left, dtype=float)[select], effective_floor)
+    right = np.maximum(np.asarray(censoring_cache.gbar_right, dtype=float)[select], effective_floor)
+    denominators = left * right
+    return np.asarray(censoring_cache.jump_masses, dtype=float)[select] / denominators, denominators
+
+
 def _gbar_floor_active(target_grid: Any, censoring_cache: Any, floor: float) -> bool:
     """Whether the censoring-survival estimate falls below the positivity floor where the targeting evaluates
     it (the grid midpoints and the censoring jump times); there the floor, max(floor, clip), replaces it."""
@@ -152,20 +172,11 @@ def _compute_raw_phi_direction_grid(
     first_term = np.asarray(phi_grid, dtype=float) / gbar_grid
 
     jump_times = np.asarray(censoring_cache.jump_times, dtype=float)
-    jump_masses = np.asarray(censoring_cache.jump_masses, dtype=float)
     if jump_times.size == 0:
         cumulative_jump_term = np.zeros_like(grid)
     else:
-        gbar_right_u = _evaluate_targeting_gbar(
-            censoring_cache,
-            jump_times,
-            targeting_gbar_floor=effective_gbar_floor,
-        )
-        increments = (
-            np.asarray(tail_phi_jump, dtype=float)
-            * jump_masses
-            / np.square(gbar_right_u)
-        )
+        jump_weights, _ = _censoring_jump_weights(censoring_cache, effective_gbar_floor)
+        increments = np.asarray(tail_phi_jump, dtype=float) * jump_weights
         cumulative_jump_term = _evaluate_cumulative_jump_term(
             jump_times,
             increments,
@@ -384,7 +395,6 @@ def _compute_exact_rmst_eif(
     )
 
     jump_times = np.asarray(censoring_cache.jump_times, dtype=float)
-    jump_masses = np.asarray(censoring_cache.jump_masses, dtype=float)
     if jump_times.size > 0:
         tau_integral = _evaluate_piecewise_linear_edge_integral(
             target_grid.grid_edges,
@@ -402,12 +412,8 @@ def _compute_exact_rmst_eif(
             jump_times,
             survival_clip=survival_clip,
         )
-        gbar_right_u = _evaluate_targeting_gbar(
-            censoring_cache,
-            jump_times,
-            targeting_gbar_floor=targeting_gbar_floor,
-        )
-        increments = tail_rmst_jump * jump_masses / np.square(gbar_right_u)
+        jump_weights, _ = _censoring_jump_weights(censoring_cache, targeting_gbar_floor)
+        increments = tail_rmst_jump * jump_weights
         raw_direction = raw_direction - _evaluate_cumulative_jump_term(
             jump_times,
             increments,
@@ -443,10 +449,8 @@ def _compute_exact_survival_eif(
     raw_direction = (grid > float(t0)).astype(float) / gbar_t0_right
 
     jump_times_all = np.asarray(censoring_cache.jump_times, dtype=float)
-    jump_masses_all = np.asarray(censoring_cache.jump_masses, dtype=float)
     active_mask = jump_times_all <= float(t0)
     jump_times = jump_times_all[active_mask]
-    jump_masses = jump_masses_all[active_mask]
     if jump_times.size > 0:
         s_t0 = float(
             _evaluate_survival_from_target_grid(
@@ -460,12 +464,8 @@ def _compute_exact_survival_eif(
             jump_times,
             survival_clip=survival_clip,
         )
-        gbar_right_u = _evaluate_targeting_gbar(
-            censoring_cache,
-            jump_times,
-            targeting_gbar_floor=effective_gbar_floor,
-        )
-        increments = s_t0 * jump_masses / (s_u * np.square(gbar_right_u))
+        jump_weights, _ = _censoring_jump_weights(censoring_cache, effective_gbar_floor, active_mask)
+        increments = s_t0 * jump_weights / s_u
         raw_direction = raw_direction - _evaluate_cumulative_jump_term(
             jump_times,
             increments,
