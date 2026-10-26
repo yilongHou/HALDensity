@@ -39,6 +39,7 @@ def test_point_estimate_but_no_se(data, cleaning_fails, tolerance):
         ci = density_confidence_interval(POINTS, results, cov, 1)
     assert ci["density"].notna().all() and ci[["se", "lower", "upper"]].isna().all().all()
     assert ci.attrs["basis_certified"] is False
+    assert ci.attrs["scale"] == "density"                  # review C6: recorded on this branch too
     # the point estimate is the fit's, and the original-basis SE is still there on request
     original = density_confidence_interval(POINTS, results, estimate_covariance_beta(data, results, 1, support_refit=None),
                                            1, support_refit=None)

@@ -385,6 +385,7 @@ The old behaviour of these fixes is available at `v0.1.0`.
 
 ### Fixed
 
+- When basis cleaning fails, `density_confidence_interval` now records `attrs['scale']` too (review C6).
 - Rows with a missing value in the data passed to `estimate_covariance_beta` (review C5; older code): the fit
   drops them, but the SE counted them as observations below every knot at k = 0 and returned all-NaN SEs at
   k >= 1, without a warning. The SE now drops them too.

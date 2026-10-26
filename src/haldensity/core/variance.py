@@ -388,7 +388,7 @@ def density_confidence_interval(
         density_eval = _density_at(x_values, original_theta, knots, basis_order, _support)
         nan = np.full(len(x_values), np.nan)
         result_df = pd.DataFrame({'x': x_values, 'density': density_eval, 'se': nan, 'lower': nan, 'upper': nan})
-        result_df.attrs.update(basis='cleaned', basis_certified=False, se='none: basis cleaning failed')
+        result_df.attrs.update(basis='cleaned', basis_certified=False, se='none: basis cleaning failed', scale=scale)
         return result_df
 
     theta_hat, phi_eval_selected, density_se_basis, expected_phi = _evaluation_pieces(
