@@ -3,7 +3,7 @@ name = "haldensity"
 version = "0.1.0"
 description = "Highly Adaptive Lasso MLE TMLE Density Estimation"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.26",
     "pandas>=2.2",
@@ -17,15 +17,13 @@ dependencies = [
     "ipykernel>=6.31.0",
     "matplotlib>=3.9.4",
 ]
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 keywords = ["density", "HAL", "TMLE", "L1", "spline", "MLE"]
 classifiers = [
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Operating System :: OS Independent",
@@ -45,7 +43,7 @@ turnbull = ["lifelines>=0.30.1"]
 dev = ["ruff>=0.6", "pytest>=7.4", "mypy>=1.7", "build>=1.2", "twine>=5.0", "nbmake>=1.5"]
 
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

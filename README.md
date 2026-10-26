@@ -19,13 +19,7 @@ Features
 - Sample data and simple simulators (`haldensity.datasets`, including the galaxy velocities)
 
 Install
-This repo uses Python 3.11+. With uv:
-
-```bash
-uv sync
-```
-
-Or with pip:
+This repo uses Python 3.11+. With pip:
 
 ```bash
 pip install -e .             # the package
@@ -128,7 +122,7 @@ inputs = targeting_inputs(est)            # {"old_theta": ..., "grid_points_hal_
 points = np.array([0.05, 0.07, 0.09])     # targeting points inside the data
 ```
 
-# 1) CDF targeting (F(t) at chosen points)
+**1) CDF targeting (F(t) at chosen points)**
 
 ```python
 learner = CDFTargetLearner(norm_constraint=100, basis_order=est.basis_order)
@@ -137,7 +131,7 @@ tmle, plug_in = targeted_fit["estimate"], targeted_fit["plug_in"]
 se = np.sqrt(cdf_estimand_variance(targeted_fit=targeted_fit, uncensored_data=data, targeting_points=points))
 ```
 
-# 2) Survival targeting (S(t) = 1 - F(t) at chosen points)
+**2) Survival targeting (S(t) = 1 - F(t) at chosen points)**
 
 ```python
 learner = SurvivalTargetLearner(norm_constraint=100, basis_order=est.basis_order)
@@ -146,7 +140,7 @@ tmle = targeted_fit["estimate"]
 se = np.sqrt(survival_estimand_variance(targeted_fit=targeted_fit, uncensored_data=data, targeting_points=points))
 ```
 
-# 3) Moments targeting (E[X^r], e.g. the mean)
+**3) Moments targeting (E[X^r], e.g. the mean)**
 
 ```python
 r = 1  # 1 for the mean, 2 for the second moment, etc.
@@ -156,7 +150,7 @@ tmle = targeted_fit["estimate"][0]
 se = np.sqrt(moments_estimand_variance(targeted_fit=targeted_fit, uncensored_data=data, x_moment=r))[0]
 ```
 
-# 4) Median targeting
+**4) Median targeting**
 
 ```python
 learner = MedianTargetLearner(norm_constraint=100, basis_order=est.basis_order)

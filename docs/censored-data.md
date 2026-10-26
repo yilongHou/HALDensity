@@ -50,7 +50,7 @@ The observed data are intervals `(L, R]` that contain the event time.
 **Direct optimization of the observed-data likelihood.** `IntervalCensoredFISTAEstimator` and
 `IntervalCensoredProjectedGDEstimator` maximize the interval likelihood itself, with the tuners
 `IntervalCensoredFISTATuner` and `IntervalCensoredProjectedGDTuner`. First-order methods suit these problems
-better than second-order ones (see `examples/ic_FISTA.md`).
+better than second-order ones.
 
 **Current-status data** (one inspection time per subject, with an indicator of whether the event had happened):
 `haldensity.ic.current_status.current_status_to_interval` turns them into intervals.
