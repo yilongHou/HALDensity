@@ -258,6 +258,32 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
 
 ### Changed (behaviour)
 
+- **Targeting is cross-fitted by default** (Yilong, 2026-10-26; full data and right-censored data). Every
+  targeting entry point takes `cross_fit`: `"tuner"` (default, or `True`), `"refit"`, `"nested"` or `"none"`
+  (`False`, the full-sample step as before). Cross-fitted, each fold's fit is trained on the other folds, one
+  targeting coefficient serves all folds (the full data's exact M-step, Newton-polished, pooled over the folds;
+  the right-censored step's epsilon solved on the pooled score), the estimate is the fold-size-weighted mean of
+  the targeted fold fits' values and the SE comes from each observation's influence curve under its own fold's
+  targeted fit. `"tuner"` uses the tuner's own fold fits at the parameters it chose, on its own splits: cross-fitted
+  with tuning on all folds (the bound M and, for right-censored data, Stage 1's order and knots were chosen with
+  every fold). `OptunaHyperparameterTuner.fit_best_model()` now also fits the chosen parameters on its training
+  folds and attaches them (`fold_fits_`; one more fit per fold), and `fit_right_censored(method="cvl1mle")` keeps
+  the L1 tuner's fold fits; `targeting_inputs(est)` passes them on, so existing code is cross-fitted without
+  changes. Without tuner fold fits (a fixed-bound fit, another right-censored method, other data) `"tuner"` falls
+  back to `"refit"` (the estimator's settings refitted on each training fold; right-censored: Stage 1 at the chosen
+  order and M1, then the bound, on the fold's own knots); `"nested"` repeats the whole tuning inside each training
+  fold (the fully honest version, about five times the cost). Refitted and nested fold fits are cached on the
+  estimator. Results say which version ran (`cross_fit`, `n_folds`) and add the cross-fitted plug-in
+  (`plug_in_cross_fitted`, right-censored `psi_init_cross_fitted`); `plug_in` / `psi_init` stay the full-sample
+  plug-in. **Estimates and SEs change.** For survival, the CDF and the mean (full data) the estimate is still the
+  empirical value; only the SE changes. For entropy and density L2, targeting removes the first-order term, not
+  the second-order remainder of the fold fits, which stays visible at n <= 1,600. Evidence (uncensored and the
+  tutorials' censoring, Beta(2.2, 2.5), n = 200-2,000, 300 replicates; the CV-TMLE study, 2026-10-26): survival,
+  RMST and the mean unchanged by cross-fitting (MSE 0.99-1.04x the single-step TMLE's); entropy and density L2
+  better (MSE 0.57-0.85x; about half at n = 200), their remaining bias the fold fits' second-order remainder
+  (0.3-0.6 sd at n <= 1,600; the bias-floor diagnostic, 2026-10-26). Check: the package's default reproduces that
+  study's harness exactly for all 8 right-censored targets; with one fold the full-data pooled step is the single
+  step bit for bit. The right-censored `"undersmoothed"` method keeps the full-sample step for its bound rule.
 - **Every basis and design matrix is built in float64** (Yilong, 2026-10-24; core):
   `create_basis_functions`, the multivariate tensor basis (`create_multivariate_basis`) and the full-data
   targeting bases were float32 since the package's first commit, for no recorded reason. Full-data fits and

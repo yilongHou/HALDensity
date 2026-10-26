@@ -31,6 +31,18 @@ observed_data, ...)` function and a matching `..._estimand_variance(...)`. The s
 observation's influence curve; `gbar_floor_active` in the summary says whether the positivity floor on the
 censoring survival was active where that target's influence curve uses it.
 
+The targeting is cross-fitted by default (`cross_fit="tuner"`; see the README's targeting section for the
+values). Fold v's initial fit and its censoring Kaplan-Meier come from the other folds, with the Kaplan-Meier
+convention applied to them, and the validation fold is scored as observed; one epsilon serves all folds, and
+`mode` ("iterative", "one_step", "auto") works as before on the pooled score. With `method="cvl1mle"` the fold
+fits are the L1 tuner's own fits at the chosen bound, cross-fitted with tuning on all folds: the bound, Stage
+1's order and its knots were chosen with every fold. `cross_fit="refit"` repeats Stage 1 at the chosen order and
+M1, then the bound, inside each training fold; `"nested"` repeats `fit_right_censored` with all its tuning there;
+`"none"` is the full-sample step. The summary reports `cross_fit`, `n_folds`, `psi_init` (the full-sample
+plug-in) and `psi_init_cross_fitted`. For entropy and density L2, targeting removes the first-order term, not
+the fold fits' second-order remainder (a Kullback-Leibler divergence, minus a squared L2 distance), which was
+still visible at n <= 1,600 in the CV-TMLE study (2026-10-26).
+
 **Building blocks.** `KaplanMeier` and `compute_ipcw_weights` (the censoring weights),
 `RightCensoredInitEstimator` (the IPCW-weighted HAL-MLE), `RightCensoredObservedL1MLE` (the observed-data
 L1-MLE; FISTA and projected-gradient variants), and their tuners `RightCensoredInitTuner` and

@@ -111,6 +111,27 @@ inside their L1 bound the score equations hold at the targeting points themselve
 empirical survival at t, the TMLE of the mean is the sample mean. Each result holds `estimate` (the TMLE),
 `plug_in` (the initial fit's value) and `score_residual` (the largest score-equation error).
 
+**Cross-fitted by default.** Every targeting step, full-data and right-censored, is cross-fitted unless
+`cross_fit="none"` (or `False`) is passed: each fold's fit is trained on the other folds, one targeting
+coefficient serves all folds, and each observation's influence curve is evaluated under its own fold's targeted
+fit, which gives the SE. `cross_fit` names where the fold fits come from:
+
+- `"tuner"` (default, or `True`): the tuner's own fold fits at the parameters it chose, on its own splits.
+  This is *cross-fitted with tuning on all folds*: the bound M (and, for right-censored data, Stage 1's order
+  and knots) was chosen with every fold, including the one a fit is later scored on.
+  `OptunaHyperparameterTuner.fit_best_model()` and `fit_right_censored(method="cvl1mle")` attach them to the
+  estimator (`fold_fits_`), and `targeting_inputs(est)` passes them on. An estimator fitted at a fixed bound has
+  none, and then `"tuner"` falls back to `"refit"`; the result's `cross_fit` says which ran.
+- `"refit"`: the estimator's own settings refitted on each training fold.
+- `"nested"`: the whole tuning repeated inside each training fold, so no fold fit has seen its validation fold
+  (about five times the cost of the initial fit).
+- `"none"` (or `False`): the full-sample step.
+
+For survival, the CDF and the mean the cross-fitted estimate equals the empirical value, as the full-sample one
+does; only the SE changes. For entropy and density L2, targeting removes the first-order term but not the
+second-order remainder of the fit, which was still visible at n <= 1,600 in our simulations (`estimate`
+versus `plug_in_cross_fitted`).
+
 ```python
 import numpy as np
 from haldensity.full_uni.targeting import (
