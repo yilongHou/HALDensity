@@ -51,15 +51,16 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   diagnostics: `objective_log_normalizer()`, `objective_value_`; `get_results()` records the
   objective normalizer, `max_knots` and the number of candidate knots; basis cleaning rebuilds the
   same problem.
-- Knot-aware objective for k = 0 and 1 solved in a structured (sparse) form
-  (`haldensity.core.univariate.objective.structured_problem`), shared by the fit, CV and basis
-  cleaning: k = 0 as a total-variation problem over the cell levels, k = 1 over the values at the
-  knots and one slope per knot interval; O(n + cells) nonzeros instead of the n x m basis. Same
-  optimum as the dense form (n = 200-2,000, k = 0, 1, M reasonable and 100x, K = 60, 250: objective
-  within 3.3e-6 relative, the structured solution never worse by more than 1.6e-9; log-density on
-  mass-carrying cells within 3.4e-3; cell masses within 8.5e-5 in total variation) and 1-1,900
-  times faster. Scaled for the solvers (objective / n; k = 1 slopes / max(1, M)). If no solver
-  reaches status "optimal" on it, the fit uses the dense form; `knot_aware_formulation_used_` and
+- The step-height rewrite of the exact objective (k = 0) and of the midpoint rule with the knots
+  added to the grid (k = 1) (`haldensity.core.univariate.objective.structured_problem`), shared by
+  the fit, CV and basis cleaning: at k = 0 the unknowns are the cell levels and the L1 bound is on
+  their steps (a total-variation problem); at k = 1, the values at the knots and one slope per knot
+  interval; O(n + cells) nonzeros instead of the n x m basis. Same optimum as the dense form (n =
+  200-2,000, k = 0, 1, M reasonable and 100x, K = 60, 250: objective within 3.3e-6 relative, the
+  rewrite's solution never worse by more than 1.6e-9; log-density on mass-carrying cells within
+  3.4e-3; cell masses within 8.5e-5 in total variation) and 1-1,900 times faster. Scaled for the
+  solvers (objective / n; k = 1 slopes / max(1, M)). If no solver reaches status "optimal" on it,
+  the fit uses the dense form; `knot_aware_formulation_used_` and
   `get_results()["knot_aware_formulation_used"]` record which. The dense form stays available as
   `CVXPYEstimator._knot_aware_formulation = "dense"` (internal). Defaults unchanged.
 - Basis cleaning before the delta-method SE, on by default (`haldensity.core.univariate.support`):
@@ -199,9 +200,10 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   `solve_attempts_`, `solver_option_` and `get_results()` record solver, status and the check.
   **Point estimates change slightly from v0.1.0**: on the 18 fixed fits of the restructure check
   (CLARABEL, no MOSEK) theta by at most 3.5e-4 and the density by at most 1.8e-4; on 32 fits (n =
-  200 and 1,000, k = 0-2, midpoint and knot-aware, two bounds each) by at most 2.7% relative (MOSEK)
-  or 8.4% (free solvers), apart from k = 0 midpoint cells the objective does not see, which it leaves
-  unidentified. All 32 were certified; MOSEK alone certified 24 and stopped short of 1e-12 (status
+  200 and 1,000, k = 0-2, two bounds each, under the old midpoint rule (199 fixed cells) and under the
+  exact objective (k = 0) or the midpoint rule with the knots added to the grid (k >= 1)) by at most
+  2.7% relative (MOSEK) or 8.4% (free solvers), apart from k = 0 cells that the old midpoint rule does
+  not see, which it leaves unidentified. All 32 were certified; MOSEK alone certified 24 and stopped short of 1e-12 (status
   "optimal_inaccurate", MOSEK's near-optimal stop made visible) in 19. Without MOSEK the final fit
   equals the previous fit + cleaning refit bit for bit. Cost: about the old fit + refit; at n =
   1,000, 0.6-0.8 s when MOSEK certifies, 2-6 s when CLARABEL or ECOS has to. CV folds keep the
