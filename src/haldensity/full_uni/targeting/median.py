@@ -90,6 +90,12 @@ class MedianTargetLearner(BaseTargetLearner):
         """Targeting basis at the fine evaluation grid, (n_grid_full, 1): I(x < m)."""
         return self._indicator(data_grid_full['W1'].values, **kwargs)
     
+    def influence_curve_at(self, density: ExactDensity, x: np.ndarray, **kwargs) -> np.ndarray:
+        """(1/2 - I(x < m)) / f(m) under ``density``, m its median."""
+        median = density.quantile(0.5)
+        at = float(density.density(np.array([median]))[0])
+        return ((0.5 - (np.asarray(x, dtype=float) < median)) / at)[:, None]
+
     def get_estimand_variance(
         self,
         targeted_fit: dict[str, Any],
@@ -119,6 +125,9 @@ class MedianTargetLearner(BaseTargetLearner):
         np.ndarray
             Estimated variance for the median (single element array).
         """
+        cross_fitted = self._cross_fitted_variance(targeted_fit, uncensored_data)
+        if cross_fitted is not None:                # each observation under its own fold's targeted fit
+            return cross_fitted
         # Step 1: the targeted median and the density there, exact (the M-step's estimate)
         estimate = self._exact_estimate(targeted_fit)
         if estimate is None:
@@ -154,7 +163,10 @@ def median_targeting_M_step(
     grid_points_hal_selected: Union[list, np.ndarray],
     old_theta: Union[list, np.ndarray],
     norm_constraint: int = 20,
-    basis_order: int = DEFAULT_BASIS_ORDER
+    basis_order: int = DEFAULT_BASIS_ORDER,
+    cross_fit: Union[str, bool] = "tuner",
+    fit: Any = None,
+    folds: Any = None
 ) -> dict:
     """
     Convenience function that wraps the MedianTargetLearner for backward compatibility.
@@ -164,8 +176,11 @@ def median_targeting_M_step(
         uncensored_augmented=uncensored_augmented,
         grid_points_hal_selected=grid_points_hal_selected,
         old_theta=old_theta,
-        _old_theta=old_theta, # serves as kwarg 
-        _grid_points_hal_selected=grid_points_hal_selected # serves as kwarg
+        _old_theta=old_theta,  # serves as kwarg
+        _grid_points_hal_selected=grid_points_hal_selected,  # serves as kwarg
+        cross_fit=cross_fit,
+        fit=fit,
+        folds=folds
     )
 
 

@@ -27,6 +27,8 @@ from tqdm import tqdm
 import optuna
 from sklearn.model_selection import KFold
 
+from haldensity.core.crossfit import FoldFits, data_key
+
 from haldensity.core.cv.conservative import SELECTION_RULES, bisection_search, conservative_threshold
 from haldensity.core.defaults import DEFAULT_BASIS_ORDER, TUNER_DEFAULTS
 from haldensity.core.options import take_deprecated
@@ -142,6 +144,9 @@ class OptunaHyperparameterTuner:
                 threshold = best - k_percent * SD ("legacy_percent_sd", default) or
                 best - se_multiplier * SD / sqrt(folds) ("one_se").
         """
+        # the arguments, for cross_fit="nested" (a fresh tuner inside each training fold)
+        self._recipe = {name: value for name, value in locals().items()
+                        if name not in ("self", "data", "deprecated", "estimator_name", "__class__")}
         if estimator_name not in ESTIMATORS:
             raise ValueError(f"Estimator '{estimator_name}' not supported. "
                            f"Available: {list(ESTIMATORS.keys())}")
@@ -602,6 +607,7 @@ class OptunaHyperparameterTuner:
         Returns:
             dictionary containing optimization results
         """
+        self._n_trials = int(n_trials)
         if not self.silent:
             print(f"\nStarting hyperparameter optimization...")
             print(f"Estimator: {self.estimator_name}")
@@ -751,10 +757,15 @@ class OptunaHyperparameterTuner:
 
     # Removed plotting functions: no visualization in this module
     
-    def fit_best_model(self) -> Any:
+    def fit_best_model(self, *, _fold_fits: bool = True) -> Any:
         """
         Fit the estimator with the best found hyperparameters on the full dataset.
-        
+
+        The same parameters are also fitted on each of the tuner's training folds and attached to the
+        estimator as ``fold_fits_`` (:class:`haldensity.core.crossfit.FoldFits`), for cross-fitted
+        targeting (``cross_fit="tuner"``: cross-fitted with tuning on all folds); that costs one more fit
+        per fold. ``fit_params_`` and ``tuning_recipe_`` record how the fit was made.
+
         Returns:
             Fitted estimator with best hyperparameters
         """
@@ -777,10 +788,31 @@ class OptunaHyperparameterTuner:
         
         # Fit on full data
         best_estimator.fit(self.data)
+        best_estimator.fit_params_ = dict(params)
+        best_estimator.tuning_recipe_ = {"estimator_name": self.estimator_name, "tuner_kwargs": dict(self._recipe),
+                                         "n_trials": getattr(self, "_n_trials", 50)}
+        if _fold_fits:
+            best_estimator.fold_fits_ = self._fold_fits(params)
         
         if not self.silent:
             print("Best model fitted successfully!")
         return best_estimator
+
+    def _fold_fits(self, params: dict[str, Any]) -> Optional[FoldFits]:
+        """The chosen parameters fitted on each training fold of the tuner's own splits, like the final fit;
+        None if a fold fails (cross-fitting then refits)."""
+        splits, estimators = [], []
+        for train_idx, val_idx in self.kfold.split(self.data):
+            estimator = self.estimator_class(**params)
+            try:
+                estimator.fit(self.data.iloc[train_idx].reset_index(drop=True))
+            except Exception:  # noqa: BLE001 -- cross-fitting falls back to refitting
+                return None
+            estimator.fit_params_ = dict(params)
+            splits.append((np.asarray(train_idx).copy(), np.asarray(val_idx).copy()))
+            estimators.append(estimator)
+        return FoldFits(splits=splits, estimators=estimators, source="tuner",
+                        data_key=data_key(self.data["W1"].to_numpy()))
     
     # Removed evaluation visualization; users can compute metrics via estimator APIs
     

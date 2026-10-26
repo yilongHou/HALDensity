@@ -124,11 +124,15 @@ def resolve_fold_fits(initial_estimator: Any, observed_data: pd.DataFrame, cross
         return tuner_fits
     if cross_fit == "tuner":
         cross_fit = "refit"
+    cache = getattr(initial_estimator, "__dict__", {}).setdefault("_cross_fit_cache", {})  # one refit per fit
+    if (cross_fit, key) in cache:
+        return cache[(cross_fit, key)]
     splits = [(train.copy(), validation.copy()) for train, validation in tuner_fits.splits] if usable \
         else default_splits(len(data))
     make = _refit if cross_fit == "refit" else _nested
     estimators = [make(initial_estimator, data.iloc[train].reset_index(drop=True)) for train, _ in splits]
-    return FoldFits(splits=splits, estimators=estimators, source=cross_fit, data_key=key)
+    cache[(cross_fit, key)] = FoldFits(splits=splits, estimators=estimators, source=cross_fit, data_key=key)
+    return cache[(cross_fit, key)]
 
 
 def _refit(estimator: Any, train: pd.DataFrame) -> Any:

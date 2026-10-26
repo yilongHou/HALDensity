@@ -18,13 +18,15 @@ the coefficient of every step (``theta_targeting_path``), log Z of the initial a
 last targeted density at any points (the SE, or the influence curve on held-out data).
 """
 from types import SimpleNamespace
-from typing import Any, Callable, Sequence, Union
+import warnings
+from typing import Any, Callable, Optional, Sequence, Union
 
 import numpy as np
 import pandas as pd
 
 from haldensity.core.defaults import DEFAULT_BASIS_ORDER
-from haldensity.full_uni.targeting.base import BaseTargetLearner
+from haldensity.core.crossfit import FoldFits, resolve_cross_fit
+from haldensity.full_uni.targeting.base import NO_CROSS_FIT_WARNING, BaseTargetLearner
 from haldensity.full_uni.targeting.exact import ExactDensity, cell_edges, converged_rule, log_integral
 
 # stop repeating the step when |P_n D*| is at most this
@@ -117,13 +119,27 @@ class FitDependentTargetLearner(BaseTargetLearner):
         uncensored_augmented: pd.DataFrame,
         grid_points_hal_selected: Union[list, np.ndarray],
         old_theta: Union[list, np.ndarray],
+        *,
+        cross_fit: Union[str, bool] = "tuner",
+        fit: Any = None,
+        folds: Optional[FoldFits] = None,
         **kwargs,
     ) -> dict[str, Any]:
         """The targeting step(s) from the initial fit; the results of
         :meth:`BaseTargetLearner.run_m_step` (for the last step) plus ``theta_targeting_path``,
-        ``log_normalizer_path`` and ``eic_mean_path`` (see the module docstring)."""
+        ``log_normalizer_path`` and ``eic_mean_path`` (see the module docstring). ``cross_fit``, ``fit`` and
+        ``folds`` as in :meth:`BaseTargetLearner.run_m_step`; cross-fitted, every step is pooled over the
+        folds (one alpha), each fold restarting from its own targeted density, until the pooled
+        |P_n D*| <= ``score_tol``."""
         old_theta, hal_knots = self._check_inputs(grid_points_hal_selected, old_theta)
         kwargs = {**kwargs, "_old_theta": old_theta, "_grid_points_hal_selected": hal_knots}
+        cross_fit = resolve_cross_fit(cross_fit)
+        if cross_fit != "none":
+            fold_fits = self._fold_fits_for(uncensored_augmented, fit, folds, cross_fit)
+            if fold_fits is not None:
+                return self._run_cross_fitted(uncensored_augmented.copy(), old_theta, hal_knots,
+                                              grid_points_hal_selected, fold_fits, kwargs)
+            warnings.warn(NO_CROSS_FIT_WARNING, UserWarning, stacklevel=2)
         fixed = _Cached(self._hal_log_density(old_theta, hal_knots))
         data = uncensored_augmented.copy()
         x = data["W1"].to_numpy(dtype=float)
@@ -141,8 +157,46 @@ class FitDependentTargetLearner(BaseTargetLearner):
                 break
         results = self._results(step, fixed, old_theta, grid_points_hal_selected, hal_knots, step_kwargs)
         results.update(theta_targeting_path=np.array(alphas), log_normalizer_path=np.array(log_zs),
-                       eic_mean_path=np.array(eic_means))
+                       eic_mean_path=np.array(eic_means), cross_fit="none")
         return results
+
+    def _run_cross_fitted(self, data: pd.DataFrame, old_theta: np.ndarray, hal_knots: np.ndarray,
+                          grid_points_hal_selected, fold_fits: FoldFits, kwargs: dict) -> dict[str, Any]:
+        """The steps pooled over the folds: each fold starts from its own fit, then from its own targeted
+        density; one alpha per step; stop when the pooled P_n D* is within score_tol."""
+        folds = self._fold_inputs(data, fold_fits, kwargs)
+        n = float(sum(fold[2].shape[0] for fold in folds))
+        starts = []
+        for fixed_v, knots_v, _, _, _ in folds:
+            cached = _Cached(fixed_v)
+            starts.append((cached, log_integral(cached, converged_rule(cached, cell_edges(knots_v)))))
+        alphas, log_zs, eic_means = [], [[start[1] for start in starts]], []
+        for _ in range(self.max_steps):
+            step_folds = [(start[0], knots_v, data_v, {**kwargs_v, "_start": start})
+                          for start, (_, knots_v, data_v, kwargs_v, _) in zip(starts, folds)]
+            steps = self._pooled_steps(step_folds)
+            last_kwargs = [fold[3] for fold in step_folds]
+            starts = [(_Cached(step.targeted), step.density.log_z) for step in steps]
+            alphas.append(float(steps[0].alpha[0]))
+            log_zs.append([step.density.log_z for step in steps])
+            eic_means.append(float(sum(
+                (data_v.shape[0] / n) * np.mean(self.influence_curve(start[0](data_v["W1"].to_numpy(dtype=float))
+                                                                      - step.density.log_z,
+                                                                      self.functional(step.density)))
+                for start, step, (_, _, data_v, _, _) in zip(starts, steps, folds))))
+            if abs(eic_means[-1]) <= self.score_tol:
+                break
+        final_folds = [(fixed_v, knots_v, data_v, kwargs_last, rows)
+                       for (fixed_v, knots_v, data_v, _, rows), kwargs_last in zip(folds, last_kwargs)]
+        return self._results_cross_fitted(
+            steps, final_folds, fold_fits, data, old_theta, hal_knots, grid_points_hal_selected, kwargs,
+            extra={"theta_targeting_path": np.array(alphas), "log_normalizer_path": None,
+                   "fold_log_normalizer_paths": [list(path) for path in zip(*log_zs)],
+                   "eic_mean_path": np.array(eic_means)})
+
+    def influence_curve_at(self, density: ExactDensity, x: np.ndarray, **kwargs) -> np.ndarray:
+        log_density = density.log_density(np.asarray(x, dtype=float)) - density.log_z
+        return self.influence_curve(log_density, self.functional(density))[:, None]
 
     def last_log_density(self, targeted_fit: dict[str, Any]) -> Callable[[np.ndarray], np.ndarray]:
         """The last targeted density's log-density (normalized), rebuilt from ``targeted_fit``'s path."""
@@ -159,12 +213,20 @@ class FitDependentTargetLearner(BaseTargetLearner):
 
     def eic_values(self, targeted_fit: dict[str, Any], x: np.ndarray) -> np.ndarray:
         """D*(x) under the last targeted density, at its estimate."""
+        if targeted_fit.get("cross_fit", "none") != "none":
+            values = np.asarray(targeted_fit["eic_values"], dtype=float)[:, 0]
+            if len(np.atleast_1d(x)) != values.size:
+                raise ValueError("a cross-fitted fit has influence-curve values at its own data only")
+            return values
         estimate = float(self._exact_estimate(targeted_fit)[0])
         return self.influence_curve(self.last_log_density(targeted_fit)(x), estimate)
 
     def get_estimand_variance(self, targeted_fit: dict[str, Any], uncensored_data: pd.DataFrame,
                               **kwargs) -> np.ndarray:
         """Var(D*) / n, D* the influence curve under the last targeted density at the data (one-element array)."""
+        cross_fitted = self._cross_fitted_variance(targeted_fit, uncensored_data)
+        if cross_fitted is not None:
+            return cross_fitted
         eic = self.eic_values(targeted_fit, uncensored_data["W1"].to_numpy(dtype=float))
         return np.array([np.var(eic, ddof=1) / eic.size])
 
@@ -198,11 +260,15 @@ def entropy_targeting_M_step(
     norm_constraint: float = 20,
     basis_order: int = DEFAULT_BASIS_ORDER,
     max_steps: int = 1,
+    cross_fit: Union[str, bool] = "tuner",
+    fit: Any = None,
+    folds: Any = None,
 ) -> dict:
     """:class:`EntropyTargetLearner`'s M-step in one call."""
     learner = EntropyTargetLearner(norm_constraint=norm_constraint, basis_order=basis_order, max_steps=max_steps)
     return learner.run_m_step(uncensored_augmented=uncensored_augmented,
-                              grid_points_hal_selected=grid_points_hal_selected, old_theta=old_theta)
+                              grid_points_hal_selected=grid_points_hal_selected, old_theta=old_theta,
+                              cross_fit=cross_fit, fit=fit, folds=folds)
 
 
 def entropy_estimand_variance(
@@ -223,11 +289,15 @@ def density_l2_targeting_M_step(
     norm_constraint: float = 20,
     basis_order: int = DEFAULT_BASIS_ORDER,
     max_steps: int = 1,
+    cross_fit: Union[str, bool] = "tuner",
+    fit: Any = None,
+    folds: Any = None,
 ) -> dict:
     """:class:`DensityL2TargetLearner`'s M-step in one call."""
     learner = DensityL2TargetLearner(norm_constraint=norm_constraint, basis_order=basis_order, max_steps=max_steps)
     return learner.run_m_step(uncensored_augmented=uncensored_augmented,
-                              grid_points_hal_selected=grid_points_hal_selected, old_theta=old_theta)
+                              grid_points_hal_selected=grid_points_hal_selected, old_theta=old_theta,
+                              cross_fit=cross_fit, fit=fit, folds=folds)
 
 
 def density_l2_estimand_variance(

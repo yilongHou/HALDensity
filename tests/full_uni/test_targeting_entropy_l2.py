@@ -51,7 +51,7 @@ def test_one_entropy_step_solves_the_influence_curve_equation(k):
     data, inputs = _fit(300, k, 30.0, seed=301 + k)
     x = data["W1"].to_numpy()
     learner = EntropyTargetLearner(norm_constraint=100, basis_order=k, max_steps=5)
-    fit = learner.run_m_step(uncensored_augmented=data, **inputs)
+    fit = learner.run_m_step(cross_fit="none", uncensored_augmented=data, **inputs)
     assert len(fit["theta_targeting_path"]) == 1
     assert abs(fit["eic_mean_path"][-1]) < 1e-12 and fit["score_residual"] < 1e-12
     assert abs(np.mean(learner.eic_values(fit, x))) < 1e-12
@@ -66,11 +66,11 @@ def test_one_entropy_step_solves_the_influence_curve_equation(k):
 def test_density_l2_steps_repeat_until_the_influence_curve_equation_holds(k):
     data, inputs = _fit(300, k, 30.0, seed=301 + k)
     x = data["W1"].to_numpy()
-    one = density_l2_targeting_M_step(data, **inputs, norm_constraint=100, basis_order=k)
+    one = density_l2_targeting_M_step(data, cross_fit="none", **inputs, norm_constraint=100, basis_order=k)
     assert one["score_residual"] < 1e-12                       # the step's own score equation P_n b = E b
     assert len(one["theta_targeting_path"]) == 1
     learner = DensityL2TargetLearner(norm_constraint=100, basis_order=k, max_steps=25)
-    repeated = learner.run_m_step(uncensored_augmented=data, **inputs)
+    repeated = learner.run_m_step(cross_fit="none", uncensored_augmented=data, **inputs)
     assert abs(repeated["eic_mean_path"][-1]) <= 1e-10
     assert abs(np.mean(learner.eic_values(repeated, x))) <= 1e-10
     assert 1 < len(repeated["theta_targeting_path"]) < 25
@@ -85,7 +85,7 @@ def test_a_uniform_start_leaves_nothing_to_target(learner_class):
     # a fit with no knots and no slope (e.g. k = 0 at M = 0) is uniform: D* is constant, the coefficient is 0
     data = pd.DataFrame({"W1": np.random.default_rng(0).uniform(size=50)})
     learner = learner_class(norm_constraint=10, basis_order=0, max_steps=3)
-    fit = learner.run_m_step(uncensored_augmented=data, grid_points_hal_selected=np.zeros(0), old_theta=np.zeros(1))
+    fit = learner.run_m_step(cross_fit="none", uncensored_augmented=data, grid_points_hal_selected=np.zeros(0), old_theta=np.zeros(1))
     assert list(fit["theta_targeting_path"]) == [0.0] and fit["solver_status"] == "constant influence curve"
     assert fit["estimate"][0] == pytest.approx(fit["plug_in"][0], abs=1e-14)
     assert fit["estimate"][0] == pytest.approx(0.0 if learner_class is EntropyTargetLearner else 1.0, abs=1e-12)
@@ -94,8 +94,8 @@ def test_a_uniform_start_leaves_nothing_to_target(learner_class):
 
 def test_plug_in_and_tmle_recover_a_beta_density_at_large_n():
     data, inputs = _fit(2000, 2, 60.0, seed=7)
-    entropy = entropy_targeting_M_step(data, **inputs, norm_constraint=100, basis_order=2)
-    l2 = density_l2_targeting_M_step(data, **inputs, norm_constraint=100, basis_order=2)
+    entropy = entropy_targeting_M_step(data, cross_fit="none", **inputs, norm_constraint=100, basis_order=2)
+    l2 = density_l2_targeting_M_step(data, cross_fit="none", **inputs, norm_constraint=100, basis_order=2)
     se_entropy = np.sqrt(entropy_estimand_variance(targeted_fit=entropy, uncensored_data=data, basis_order=2)[0])
     se_l2 = np.sqrt(density_l2_estimand_variance(targeted_fit=l2, uncensored_data=data, basis_order=2)[0])
     for value in (entropy["plug_in"][0], entropy["estimate"][0]):
@@ -113,7 +113,7 @@ def test_influence_curve_variance_against_a_small_simulation():
         data, inputs = _fit(400, 1, 20.0, seed=100 + rep)
         for name, learner in (("entropy", EntropyTargetLearner(norm_constraint=100, basis_order=1)),
                               ("l2", DensityL2TargetLearner(norm_constraint=100, basis_order=1))):
-            fit = learner.run_m_step(uncensored_augmented=data, **inputs)
+            fit = learner.run_m_step(cross_fit="none", uncensored_augmented=data, **inputs)
             estimates[name].append(fit["estimate"][0])
             variances[name].append(learner.get_estimand_variance(fit, data)[0])
     for name in estimates:

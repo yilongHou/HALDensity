@@ -121,6 +121,11 @@ class MomentsTargetLearner(BaseTargetLearner):
         
         return b_jk_targeting_full
     
+    def influence_curve_at(self, density: ExactDensity, x: np.ndarray, **kwargs) -> np.ndarray:
+        """x^k - E[X^k] under ``density``."""
+        power = int(kwargs.get("x_moment", 1))
+        return (np.asarray(x, dtype=float) ** power - density.moment(power))[:, None]
+
     def get_estimand_variance(
         self,
         targeted_fit: dict[str, Any],
@@ -150,6 +155,9 @@ class MomentsTargetLearner(BaseTargetLearner):
         np.ndarray
             Estimated variance for the k-th moment (single element array).
         """
+        cross_fitted = self._cross_fitted_variance(targeted_fit, uncensored_data)
+        if cross_fitted is not None:                # each observation under its own fold's targeted fit
+            return cross_fitted
         x_moment = kwargs.get('x_moment', 1)  # Default to first moment if not specified
         
         # Step 1: the targeted k-th moment, exact (the M-step's estimate); the sample variance below does
@@ -180,7 +188,10 @@ def moments_targeting_M_step(
     grid_points_hal_selected: Union[list, np.ndarray],
     old_theta: Union[list, np.ndarray],
     norm_constraint: int = 20,
-    basis_order: int = DEFAULT_BASIS_ORDER
+    basis_order: int = DEFAULT_BASIS_ORDER,
+    cross_fit: Union[str, bool] = "tuner",
+    fit: Any = None,
+    folds: Any = None
 ) -> dict:
     """
     Convenience function that wraps the MomentsTargetLearner for backward compatibility.
@@ -190,7 +201,10 @@ def moments_targeting_M_step(
         uncensored_augmented=uncensored_augmented,
         grid_points_hal_selected=grid_points_hal_selected,
         old_theta=old_theta,
-        x_moment=x_moment
+        x_moment=x_moment,
+        cross_fit=cross_fit,
+        fit=fit,
+        folds=folds
     )
 
 

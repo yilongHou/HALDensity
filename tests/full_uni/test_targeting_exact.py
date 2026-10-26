@@ -44,13 +44,13 @@ def test_exact_density_matches_adaptive_quadrature():
 def test_survival_and_mean_score_equations_hold_at_the_targets(k):
     data, inputs = _inputs(k)
     x = data["W1"].to_numpy()
-    surv = SurvivalTargetLearner(norm_constraint=100, basis_order=k).run_m_step(**inputs, targeting_points=TARGETS)
+    surv = SurvivalTargetLearner(norm_constraint=100, basis_order=k).run_m_step(cross_fit="none", **inputs, targeting_points=TARGETS)
     np.testing.assert_allclose(surv["estimate"], [np.mean(x > t) for t in TARGETS], atol=1e-9)
     assert surv["score_residual"] < 1e-9
     assert surv["plug_in"].shape == (3,) and np.all(np.diff(surv["plug_in"]) < 0)
     variance = survival_estimand_variance(targeted_fit=surv, uncensored_data=data, targeting_points=TARGETS)
     assert np.all(np.isfinite(variance) & (variance > 0))
-    mean = MomentsTargetLearner(norm_constraint=100, basis_order=k).run_m_step(**inputs, x_moment=1)
+    mean = MomentsTargetLearner(norm_constraint=100, basis_order=k).run_m_step(cross_fit="none", **inputs, x_moment=1)
     assert mean["estimate"][0] == pytest.approx(x.mean(), abs=1e-9)
     assert moments_estimand_variance(targeted_fit=mean, uncensored_data=data, x_moment=1)[0] > 0
     model = BaseTargetLearner.to_results_model(surv)
@@ -61,7 +61,7 @@ def test_median_score_equation_holds_at_the_initial_median():
     data, inputs = _inputs(2)
     x = data["W1"].to_numpy()
     learner = MedianTargetLearner(norm_constraint=100, basis_order=2)
-    med = learner.run_m_step(**inputs)
+    med = learner.run_m_step(cross_fit="none", **inputs)
     m0, alpha = learner._median_cache[1], med["theta_targeting"][0]
     theta, knots = inputs["old_theta"], inputs["grid_points_hal_selected"]
     log_f = lambda z: log_unnormalized_density(z, theta, knots, 2) + alpha * (z < m0)
@@ -74,7 +74,7 @@ def test_median_score_equation_holds_at_the_initial_median():
 
 def test_a_fit_without_exact_estimates_falls_back_with_a_warning():
     data, inputs = _inputs(2)
-    surv = SurvivalTargetLearner(norm_constraint=100, basis_order=2).run_m_step(**inputs, targeting_points=TARGETS)
+    surv = SurvivalTargetLearner(norm_constraint=100, basis_order=2).run_m_step(cross_fit="none", **inputs, targeting_points=TARGETS)
     old = {key: value for key, value in surv.items() if key != "estimate"}
     with pytest.warns(UserWarning, match="no exact 'estimate'"):
         survival_estimand_variance(targeted_fit=old, uncensored_data=data, targeting_points=TARGETS)
@@ -92,8 +92,10 @@ def test_targeting_works_when_the_fit_selects_no_knots():
     assert inputs["grid_points_hal_selected"].size == 0
     x = data["W1"].to_numpy()
     survival = SurvivalTargetLearner(norm_constraint=100, basis_order=0).run_m_step(
+        cross_fit="none",
         uncensored_augmented=data, **inputs, targeting_points=np.array([0.3]))
     mean = MomentsTargetLearner(norm_constraint=100, basis_order=0).run_m_step(
+        cross_fit="none",
         uncensored_augmented=data, **inputs, x_moment=1)
     np.testing.assert_allclose(survival["estimate"], [np.mean(x > 0.3)], atol=1e-12)
     np.testing.assert_allclose(mean["estimate"], [x.mean()], atol=1e-12)
@@ -108,7 +110,7 @@ def test_the_results_model_keeps_how_the_targeting_was_solved():
 
     data = pd.DataFrame({"W1": np.random.default_rng(1).beta(2, 5, 150)})
     learner = SurvivalTargetLearner(norm_constraint=100, basis_order=1)
-    fit = learner.run_m_step(uncensored_augmented=data, **targeting_inputs(CVXPYEstimator(norm_constraint=10.0,
+    fit = learner.run_m_step(cross_fit="none", uncensored_augmented=data, **targeting_inputs(CVXPYEstimator(norm_constraint=10.0,
                              basis_order=1).fit(data)), targeting_points=np.array([0.2, 0.4]))
     model = learner.to_results_model(fit)
     assert model.score_residual == fit["score_residual"]
@@ -132,9 +134,11 @@ def test_a_binding_bound_warns():
     points = np.linspace(0.05, 0.75, 40)
     with pytest.warns(UserWarning, match="reached their L1 bound"):
         SurvivalTargetLearner(norm_constraint=20, basis_order=1).run_m_step(
+            cross_fit="none",
             uncensored_augmented=data, **inputs, targeting_points=points)
     with warnings.catch_warnings():
         warnings.simplefilter("error", UserWarning)
         fit = SurvivalTargetLearner(norm_constraint=100, basis_order=1).run_m_step(
+            cross_fit="none",
             uncensored_augmented=data, **inputs, targeting_points=points)
     assert fit["score_residual"] < 1e-10

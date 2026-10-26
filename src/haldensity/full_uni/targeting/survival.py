@@ -135,6 +135,12 @@ class SurvivalTargetLearner(BaseTargetLearner):
         
         return b_jk_targeting_full
     
+    def influence_curve_at(self, density: ExactDensity, x: np.ndarray, **kwargs) -> np.ndarray:
+        """I(x > t) - S(t) under ``density``, one column per targeting point."""
+        points = np.atleast_1d(np.asarray(kwargs["targeting_points"], dtype=float))
+        x = np.asarray(x, dtype=float)
+        return (x[:, None] > points[None, :]).astype(float) - density.survival(points)[None, :]
+
     def get_estimand_variance(
         self,
         targeted_fit: dict[str, Any],
@@ -169,6 +175,9 @@ class SurvivalTargetLearner(BaseTargetLearner):
         np.ndarray
             Estimated variances for each targeting point, shape (n_targeting_points,).
         """
+        cross_fitted = self._cross_fitted_variance(targeted_fit, uncensored_data)
+        if cross_fitted is not None:                # each observation under its own fold's targeted fit
+            return cross_fitted
         targeting_points = kwargs['targeting_points']
 
         # Steps 1-2: the targeted survival at the targeting points, exact (the M-step's estimate); the sample
@@ -202,7 +211,10 @@ def survival_targeting_M_step(
     grid_points_hal_selected: Union[list, np.ndarray],
     old_theta: Union[list, np.ndarray],
     norm_constraint: int = 20,
-    basis_order: int = DEFAULT_BASIS_ORDER
+    basis_order: int = DEFAULT_BASIS_ORDER,
+    cross_fit: Union[str, bool] = "tuner",
+    fit: Any = None,
+    folds: Any = None
 ) -> dict:
     """
     Convenience function that wraps the SurvivalTargetLearner for backward compatibility.
@@ -212,7 +224,10 @@ def survival_targeting_M_step(
         uncensored_augmented=uncensored_augmented,
         grid_points_hal_selected=grid_points_hal_selected,
         old_theta=old_theta,
-        targeting_points=targeting_points
+        targeting_points=targeting_points,
+        cross_fit=cross_fit,
+        fit=fit,
+        folds=folds
     )
 
 def survival_estimand_variance(
