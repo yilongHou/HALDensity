@@ -761,7 +761,7 @@ class RightCensoredRMSTTargetLearner:
             )
             passes_initial_threshold = bool(abs(float(init_state.eif_mean)) <= threshold_initial)
             gbar_floor_active = _gbar_floor_active(
-                _state_to_target_grid(init_state), censoring_cache, targeting_gbar_floor
+                _state_to_target_grid(init_state), censoring_cache, targeting_gbar_floor, horizon=float(tau)
             )
             init_var = float(init_var_all_eic)
             init_se = float(init_se_all_eic)

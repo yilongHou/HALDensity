@@ -30,13 +30,16 @@ def _censoring_jump_weights(
     return np.asarray(censoring_cache.jump_masses, dtype=float)[select] / denominators, denominators
 
 
-def _gbar_floor_active(target_grid: Any, censoring_cache: Any, floor: float) -> bool:
-    """Whether the censoring-survival estimate falls below the positivity floor where the targeting evaluates
-    it (the grid midpoints and the censoring jump times); there the floor, max(floor, clip), replaces it."""
+def _gbar_floor_active(target_grid: Any, censoring_cache: Any, floor: float, horizon: float | None = None) -> bool:
+    """Whether the censoring-survival estimate falls below the positivity floor where the target's influence
+    curve evaluates it: the grid midpoints and the censoring jump times, up to ``horizon`` (and at it) when the
+    curve stops there (survival at t0, RMST at tau; review R3); there the floor, max(floor, clip), replaces it."""
     points = np.concatenate((
         np.asarray(target_grid.grid_midpoints, dtype=float),
         np.asarray(censoring_cache.jump_times, dtype=float),
     ))
+    if horizon is not None:
+        points = np.append(points[points <= float(horizon)], float(horizon))
     effective_floor = float(max(floor, censoring_cache.clip))
     return bool(points.size > 0 and np.any(_raw_gbar(censoring_cache, points) < effective_floor))
 

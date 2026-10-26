@@ -377,7 +377,9 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   columns (`clip_active_eic_*`, `positivity_eic_*`, `estimand_variance_clip_active_filtered*`,
   `standard_error_clip_active_filtered*`) and stored masks go with it. The floor on the censoring-survival
   estimate inside the influence curves, max(1/(sqrt(n) log n), clip), stays as a positivity safeguard; the new
-  column `gbar_floor_active` says whether it was active. In the convention check (3,600 replicates of the
+  column `gbar_floor_active` says whether it was active where that target's influence curve uses the censoring
+  survival (up to t0 for survival, up to tau for RMST, everywhere for the mean, entropy and density L2; review
+  R3), in every targeting summary, survival v1 included (R4). In the convention check (3,600 replicates of the
   tutorials' design, n = 200 to 1,000) neither the floor nor the filter triggered once the convention was in.
   Results where nothing was left out are unchanged (the one-step variances to rounding, 3e-16).
 

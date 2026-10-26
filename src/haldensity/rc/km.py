@@ -27,8 +27,9 @@ def _last_time_as_event(times: np.ndarray, delta: np.ndarray) -> np.ndarray:
 def last_time_as_event(data: pd.DataFrame, time_col: str = "T", delta_col: str = "Delta") -> pd.DataFrame:
     """Apply the Kaplan-Meier convention: when the largest observed time is censored, treat it as an event.
 
-    Returns ``data`` itself when its largest time is already an event, otherwise a copy with
-    ``delta_col`` set to 1 at that time. Applying it twice changes nothing.
+    Every observation at the largest time becomes an event (with ties there, all of them). Returns ``data``
+    itself when all of them already are events, otherwise a copy with ``delta_col`` set to 1 at that time.
+    Applying it twice changes nothing.
     """
     if data.empty or time_col not in data.columns or delta_col not in data.columns:
         return data

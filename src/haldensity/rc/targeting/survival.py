@@ -73,6 +73,7 @@ def _target_survival_t0(
     raw_direction, centered_direction, direction_details = _compute_dfg_t0_on_grid(
         target_grid, censoring_cache, t0, survival_clip
     )
+    gbar_floor_active = _gbar_floor_active(target_grid, censoring_cache, 0.0, horizon=float(t0))
     psi_init = float(_evaluate_survival(target_grid, np.array([t0]), survival_clip)[0])
     initial_eic_values = _tmle_eif_values(0.0, target_grid, centered_direction, data)
     initial_eif_mean = float(np.mean(initial_eic_values))
@@ -143,6 +144,7 @@ def _target_survival_t0(
         "standard_error_one_step": one_step_standard_error,
         "ci_lower_one_step": ci_lower_one_step,
         "ci_upper_one_step": ci_upper_one_step,
+        "gbar_floor_active": gbar_floor_active,
         "gbar_right_on_target_grid": _evaluate_gbar(censoring_cache, target_grid.grid_midpoints),
         "gbar_left_on_target_grid": _evaluate_gbar_left(censoring_cache, target_grid.grid_midpoints),
         "diagnostic_eps_grid": diagnostic_eps_grid,
@@ -201,6 +203,7 @@ def _package_pointwise_fit(
         "target_grid_augmented_with_t0": result.diagnostics["direction_details"][
             "target_grid_augmented_with_t0"
         ],
+        "gbar_floor_active": result.diagnostics["gbar_floor_active"],
     }
     if store_pointwise_arrays:
         fit.update(
@@ -744,6 +747,7 @@ class RightCensoredSurvivalTargetLearner:
                     r.diagnostics["direction_details"]["target_grid_augmented_with_t0"]
                     for r in results
                 ],
+                "gbar_floor_active": [r.diagnostics["gbar_floor_active"] for r in results],
             }
         )
 
@@ -898,7 +902,7 @@ def right_censored_survival_targeting_M_step_v2(
             min_score_tol,
         )
         gbar_floor_active = _gbar_floor_active(
-            _state_to_target_grid(init_state), censoring_cache, targeting_gbar_floor
+            _state_to_target_grid(init_state), censoring_cache, targeting_gbar_floor, horizon=float(t0)
         )
         passes_initial_threshold = bool(abs(float(init_state.eif_mean)) <= threshold_initial)
 

@@ -29,7 +29,7 @@ influence-curve standard error: survival at time points, the mean, the restricte
 squared-density functional (density L2) and the entropy. Each target has a `..._targeting_M_step(initial_estimator,
 observed_data, ...)` function and a matching `..._estimand_variance(...)`. The standard error uses every
 observation's influence curve; `gbar_floor_active` in the summary says whether the positivity floor on the
-censoring survival was active.
+censoring survival was active where that target's influence curve uses it.
 
 **Building blocks.** `KaplanMeier` and `compute_ipcw_weights` (the censoring weights),
 `RightCensoredInitEstimator` (the IPCW-weighted HAL-MLE), `RightCensoredObservedL1MLE` (the observed-data
