@@ -272,7 +272,8 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   has no units, so the SE no longer changes when the data's units do; the intercept and any column constant on
   the data are dropped (no spread there, e.g. the knot at min(x) at k = 0, whose centred score is not 0; review
   C1, 2026-10-25: it had been kept, adding about p(x)^2 / n to the variance; k = 0 SEs fall by 1-7% where that
-  knot is selected). Evidence (round 2, 180 cells, rules fixed in advance): on the original data the floor
+  knot is selected; at k >= 1 the rule also drops the knot at max(x), whose column is 0 on the data).
+  Evidence (round 2, 180 cells, rules fixed in advance): on the original data the floor
   matches the ridge's coverage (mean |coverage - 95%|, floor minus ridge, -0.026, bootstrap SE 0.0015); on
   copies of the same data with squeezed units the ridge loses more than 3 coverage points in 98 of 180 cells,
   while the floor's SE is unchanged to 1e-9. **SEs and intervals change**: before/after on 12 fixed fits (the
@@ -362,7 +363,9 @@ emits a `DeprecationWarning`, and they are removed in 0.3.0. Deeper module paths
   observed and apply it to each training fold and to the final fit only; held-out losses see the
   validation data as observed (review R2, 2026-10-25: applying it to the sample before the split had let
   a validation fold score a censored largest time as an event; on the rc/01 tutorial's sample Stage-1 CV
-  then picked M1 = 26.6 instead of 78.6).
+  then picked M1 = 26.6 instead of 78.6). The log-likelihoods reported on the whole sample see it as
+  observed too: the EM tuner's `_compute_loglik` and the `observed_loglik` column of the `"undersmoothed"`
+  path score a censored largest time as censored (review F3).
   New `haldensity.rc.last_time_as_event(data)` applies it (use it before calling `compute_ipcw_weights`
   directly). Why: when the largest time was censored (about 10% of samples in the tutorials' design,
   Beta(2.2, 2.5) event times with Uniform[0, 1.2] censoring, at n = 200 to 1,000), the influence curves of
@@ -395,7 +398,9 @@ The old behaviour of these fixes is available at `v0.1.0`.
   1,002 float64 at 1,000 knots), and `density_confidence_interval` built it a second time just for the
   original fit's density. It is now summed 4,096 nodes at a time and the density needs only log Z: at 1,000
   selected knots (k = 2, n = 3,000) peak memory 983 MB -> 107 MB in `estimate_covariance_beta` and 992 MB ->
-  105 MB in `density_confidence_interval`, the same time, SEs equal to 1e-10.
+  105 MB in `density_confidence_interval`, the same time, SEs equal to 1e-10. With more than 4,096 nodes the
+  blocks change the order of summation, so E[phi] differs from the old values by about 1e-14 relative (review
+  F3).
 - `estimate_covariance_beta(_ridge_param=...)` without `_inverse="ridge"` was ignored silently once the scaled
   floor became the default (review C3); it now raises a ValueError. `_inverse="ridge"` alone uses the reference
   ridge 1e-6.
