@@ -80,6 +80,18 @@ def test_density_l2_steps_repeat_until_the_influence_curve_equation_holds(k):
     assert density_l2_estimand_variance(targeted_fit=repeated, uncensored_data=data, basis_order=k)[0] > 0
 
 
+@pytest.mark.parametrize("learner_class", [EntropyTargetLearner, DensityL2TargetLearner])
+def test_a_uniform_start_leaves_nothing_to_target(learner_class):
+    # a fit with no knots and no slope (e.g. k = 0 at M = 0) is uniform: D* is constant, the coefficient is 0
+    data = pd.DataFrame({"W1": np.random.default_rng(0).uniform(size=50)})
+    learner = learner_class(norm_constraint=10, basis_order=0, max_steps=3)
+    fit = learner.run_m_step(uncensored_augmented=data, grid_points_hal_selected=np.zeros(0), old_theta=np.zeros(1))
+    assert list(fit["theta_targeting_path"]) == [0.0] and fit["solver_status"] == "constant influence curve"
+    assert fit["estimate"][0] == pytest.approx(fit["plug_in"][0], abs=1e-14)
+    assert fit["estimate"][0] == pytest.approx(0.0 if learner_class is EntropyTargetLearner else 1.0, abs=1e-12)
+    assert learner.get_estimand_variance(fit, data)[0] == pytest.approx(0.0, abs=1e-24)
+
+
 def test_plug_in_and_tmle_recover_a_beta_density_at_large_n():
     data, inputs = _fit(2000, 2, 60.0, seed=7)
     entropy = entropy_targeting_M_step(data, **inputs, norm_constraint=100, basis_order=2)

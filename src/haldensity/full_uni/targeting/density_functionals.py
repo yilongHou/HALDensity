@@ -17,6 +17,7 @@ the coefficient of every step (``theta_targeting_path``), log Z of the initial a
 (``log_normalizer_path``) and P_n D* after each step (``eic_mean_path``), from which :meth:`eic_values` rebuilds the
 last targeted density at any points (the SE, or the influence curve on held-out data).
 """
+from types import SimpleNamespace
 from typing import Any, Callable, Sequence, Union
 
 import numpy as np
@@ -102,6 +103,14 @@ class FitDependentTargetLearner(BaseTargetLearner):
 
     def get_b_jk_targeting_full(self, data_grid_full: pd.DataFrame, **kwargs) -> np.ndarray:
         return self._basis(data_grid_full["W1"].to_numpy(dtype=float), kwargs)
+
+    def _solve(self, fixed_data, b_ik_targeting, fixed_nodes, b_nodes, weights, n_samples):
+        """As the base class's, except that a constant influence curve (a uniform start density) leaves nothing to
+        target: the coefficient is 0, not wherever the solver stops along a direction that changes nothing."""
+        if np.ptp(b_nodes) == 0 and np.ptp(b_ik_targeting) == 0:
+            return np.zeros(b_ik_targeting.shape[1]), SimpleNamespace(solver_used="none",
+                                                                      status="constant influence curve")
+        return super()._solve(fixed_data, b_ik_targeting, fixed_nodes, b_nodes, weights, n_samples)
 
     def run_m_step(
         self,
